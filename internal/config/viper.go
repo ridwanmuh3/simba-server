@@ -8,15 +8,14 @@ import (
 )
 
 func NewViper() *viper.Viper {
-
-	_, err := os.Stat(".development.env")
+	_, err := os.Stat(".env")
 	if err != nil {
 		panic(fmt.Errorf("failed to locate env file: %v", err))
 	}
 
 	config := viper.New()
 
-	config.SetConfigName(".development")
+	config.SetConfigName(".env")
 	config.SetConfigType("env")
 	config.AddConfigPath("./")
 	config.AddConfigPath("./../")

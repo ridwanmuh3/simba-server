@@ -34,7 +34,6 @@ func (c *RouteConfig) SetupPublicRoute() {
 			Message: "welcome to simba api",
 		})
 	})
-	c.App.Post("/api/auth/login", c.UserHandler.Create)
 }
 
 func (c *RouteConfig) SetupAuthRoute() {

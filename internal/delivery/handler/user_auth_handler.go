@@ -22,13 +22,20 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return err
 	}
 
-	expirationTime := h.config.GetDuration("APP_COOKIE_EXPIRATION_TIME")
+	expirationTimeEnv := h.config.GetInt("APP_COOKIE_EXPIRATION_TIME")
+	if expirationTimeEnv == 0 {
+		expirationTimeEnv = 30
+	}
+
+	expirationTime := time.Now().Add(time.Duration(expirationTimeEnv) * time.Minute)
 
 	c.Cookie(&fiber.Cookie{
-		Name:    "token",
-		Value:   response.Token,
-		Expires: time.Now().Add(expirationTime),
-		// HTTPOnly: true,
+		Name:     "token",
+		Value:    response.Token,
+		Path:     "/",
+		Expires:  expirationTime,
+		MaxAge:   int(expirationTime.Unix()),
+		HTTPOnly: true,
 		// Secure: true,
 	})
 
@@ -40,10 +47,9 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 }
 
 func (h *UserHandler) Logout(c *fiber.Ctx) error {
-	request := new(model.LogoutUserRequest)
-	if err := c.BodyParser(request); err != nil {
-		h.log.Warnf("failed to parse request body: %v", err)
-		return err
+	auth := middleware.GetAuthUser(c)
+	request := &model.LogoutUserRequest{
+		ID: auth.ID,
 	}
 
 	response, err := h.userService.Logout(c.Context(), request)
@@ -53,10 +59,12 @@ func (h *UserHandler) Logout(c *fiber.Ctx) error {
 	}
 
 	c.Cookie(&fiber.Cookie{
-		Name:    "token",
-		Value:   "",
-		Expires: time.Now().Add(-1),
-		// HTTPOnly: true,
+		Name:     "token",
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Now().Add(-time.Hour),
+		MaxAge:   -1,
+		HTTPOnly: true,
 		// Secure: true,
 	})
 
@@ -69,14 +77,9 @@ func (h *UserHandler) Logout(c *fiber.Ctx) error {
 
 func (h *UserHandler) Current(c *fiber.Ctx) error {
 	auth := middleware.GetAuthUser(c)
-
-	request := new(model.FindByIdUserRequest)
-	if err := c.BodyParser(request); err != nil {
-		h.log.Warnf("failed to parse request body: %v", err)
-		return err
+	request := &model.FindByIdUserRequest{
+		ID: auth.ID,
 	}
-
-	request.ID = auth.ID
 
 	response, err := h.userService.FindById(c.Context(), request)
 	if err != nil {

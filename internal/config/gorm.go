@@ -17,11 +17,12 @@ func NewDB(viper *viper.Viper, log *zap.SugaredLogger) *gorm.DB {
 	dbName := viper.GetString("DB_NAME")
 	dbHost := viper.GetString("DB_HOST")
 	dbPort := viper.GetString("DB_PORT")
+	dbSslMode := viper.GetString("DB_SSL_MODE")
 	dbPoolIdle := viper.GetInt("DB_POOL_IDLE")
 	dbMaxPool := viper.GetInt("DB_MAX_POOL")
 	dbMaxLifetime := viper.GetDuration("DB_MAX_LIFETIME")
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s  sslmode=disable TimeZone=Asia/Jakarta", dbHost, dbUsername, dbPassword, dbName, dbPort)
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s  sslmode=%s TimeZone=Asia/Jakarta", dbHost, dbUsername, dbPassword, dbName, dbPort, dbSslMode)
 
 	gormCustomLog := zap.NewStdLog(log.Desugar())
 

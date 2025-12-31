@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/sha3"
+	"encoding/base64"
 	"time"
 
 	"github.com/google/uuid"
@@ -110,8 +111,9 @@ func (s *UserService) Verify(ctx context.Context, request *model.VerifyUserReque
 	}
 
 	return &model.Auth{
-		ID:   int(user.ID),
-		Role: user.Role,
+		ID:       int(user.ID),
+		Fullname: user.Fullname,
+		Role:     user.Role,
 	}, nil
 }
 
@@ -125,5 +127,5 @@ func (s *UserService) GenerateToken() (string, error) {
 
 	hashToken := sha3.Sum256(bcryptHashToken)
 
-	return string(hashToken[:]), nil
+	return base64.RawURLEncoding.EncodeToString(hashToken[:]), nil
 }

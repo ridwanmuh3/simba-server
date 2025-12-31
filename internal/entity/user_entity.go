@@ -8,12 +8,12 @@ import (
 
 type User struct {
 	gorm.Model
-	Username   string `gorm:"column:email;size:30;uniqueIndex;not null"`
-	Fullname   string `gorm:"column:fullname;size:50;not null"`
-	Role       string `gorm:"column:role;size:20;not null"`
-	Password   string `gorm:"column:password;size:255;not null"`
-	Token      string `gorm:"column:token;size:255;index"`
-	IsActive   bool   `gorm:"column:is_active;type:boolean;default:false"`
+	Username   string `gorm:"size:30;uniqueIndex;not null"`
+	Fullname   string `gorm:"size:50;not null"`
+	Role       string `gorm:"size:20;not null"`
+	Password   string `gorm:"size:255;not null"`
+	Token      string `gorm:"size:255;index"`
+	IsActive   bool   `gorm:"type:boolean;default:false"`
 	LastActive time.Time
 }
 

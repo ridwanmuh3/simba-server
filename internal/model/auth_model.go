@@ -3,8 +3,9 @@ package model
 import "time"
 
 type Auth struct {
-	ID   int
-	Role string
+	ID       int
+	Fullname string
+	Role     string
 }
 
 type LoginUserRequest struct {

@@ -20,6 +20,7 @@ type UserHandler struct {
 
 func NewUserHandler(config *viper.Viper, logger *zap.SugaredLogger, userService *service.UserService) *UserHandler {
 	return &UserHandler{
+		config:      config,
 		log:         logger,
 		userService: userService,
 	}

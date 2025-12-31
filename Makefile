@@ -1,9 +1,12 @@
-ENV_FILE ?= .development.env
+ENV_FILE ?= .env
 
 COMPOSE = docker compose --env-file $(ENV_FILE)
 
 run-dev:
-	go run ./app/main.go
+	go run ./cmd/app/main.go
+
+run-seed:
+	go run ./cmd/seed/seeder.go
 
 compose-up:
 	$(COMPOSE) up -d

@@ -1,0 +1,13 @@
+POST http://localhost:9000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "superadmin1",
+  "password": "superadmin1"
+}
+
+GET http://localhost:9000/api/auth/_current
+Content-Type: application/json
+
+DELETE http://localhost:9000/api/auth/logout
+Content-Type: application/json

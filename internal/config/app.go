@@ -2,8 +2,10 @@ package config
 
 import (
 	"github.com/go-playground/validator/v10"
+	"github.com/gofiber/contrib/fiberzap/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -24,12 +26,7 @@ type BootstrapConfig struct {
 }
 
 func Bootstrap(config *BootstrapConfig) {
-
-	// global middlewares
-	config.App.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowHeaders: "Cache-Control",
-	}))
+	SetupGlobalMiddlewares(config)
 
 	userRepository := repository.NewUserRepository()
 
@@ -47,4 +44,18 @@ func Bootstrap(config *BootstrapConfig) {
 	}
 
 	routeConfig.Setup()
+}
+
+func SetupGlobalMiddlewares(config *BootstrapConfig) {
+	// global middlewares
+	config.App.Use(cors.New(cors.Config{
+		AllowOrigins: "*",
+		AllowHeaders: "Cache-Control",
+	}))
+
+	config.App.Use(recover.New())
+
+	config.App.Use(fiberzap.New(fiberzap.Config{
+		Logger: config.Log.Desugar(),
+	}))
 }

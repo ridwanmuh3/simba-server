@@ -23,7 +23,7 @@ data "external_schema" "gorm" {
 }
 env "gorm" {
   src = data.external_schema.gorm.url
-  dev = "postgres://${local.envfile["DB_USERNAME"]}:${local.envfile["DB_PASSWORD"]}@${local.envfile["DB_HOST"]}:${local.envfile["DB_PORT"]}/${local.envfile["DB_NAME"]}?sslmode=${local.envfile["DB_SSL_MODE"]}"
+  dev = "postgres://${local.envfile["DB_USER"]}:${local.envfile["DB_PASSWORD"]}@${local.envfile["DB_HOST"]}:${local.envfile["DB_PORT"]}/${local.envfile["DB_NAME"]}?sslmode=${local.envfile["DB_SSL_MODE"]}"
   migration {
     dir = "file://migrations"
   }
