@@ -1,0 +1,4 @@
+-- Modify "items" table
+ALTER TABLE "public"."items" ALTER COLUMN "item_code" TYPE character varying(30), ALTER COLUMN "name" TYPE character varying(90), ALTER COLUMN "name" SET NOT NULL, ALTER COLUMN "category" TYPE character varying(30), ALTER COLUMN "category" SET NOT NULL, ALTER COLUMN "quantity" SET NOT NULL, ALTER COLUMN "unit_price" SET NOT NULL, ADD COLUMN "total_price" numeric NOT NULL;
+-- Modify "users" table
+ALTER TABLE "public"."users" ALTER COLUMN "email" TYPE character varying(30), ALTER COLUMN "email" SET NOT NULL, ALTER COLUMN "fullname" TYPE character varying(50), ALTER COLUMN "fullname" SET NOT NULL, ALTER COLUMN "role" TYPE character varying(20), ALTER COLUMN "role" SET NOT NULL, ALTER COLUMN "password" TYPE character varying(255), ALTER COLUMN "password" SET NOT NULL, ALTER COLUMN "token" TYPE character varying(255);

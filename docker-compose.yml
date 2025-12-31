@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: simba_postgres
+    restart: on-failure
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - simba_network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: simba_pgadmin
+    restart: on-failure
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    ports:
+      - "${PGADMIN_PORT}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - db
+    networks:
+      - simba_network
+
+networks:
+  simba_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  pgadmin_data:
