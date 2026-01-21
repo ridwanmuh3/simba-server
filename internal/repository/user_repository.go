@@ -36,11 +36,29 @@ func (r *UserRepository) FindAll(db *gorm.DB, query *model.FindAllUserRequest) (
 	}
 
 	var total int64
-	if err := db.Model(&entity.User{}).Scopes(r.FilterUser(query)).Count(&total).Error; err != nil {
+	if err := db.Model(new(entity.User)).Scopes(r.FilterUser(query)).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	return users, total, nil
+}
+
+func (r *UserRepository) GetUsersStats(db *gorm.DB) (*entity.UserStats, error) {
+	var stats entity.UserStats
+
+	err := db.Model(new(entity.User)).
+		Select(`
+            COUNT(*) as total,
+            COUNT(CASE WHEN role = 'Super Admin' THEN 1 END) as super_admin,
+            COUNT(CASE WHEN role = 'Admin' THEN 1 END) as admin,
+            COUNT(CASE WHEN is_active = true THEN 1 END) as active
+        `).
+		Scan(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &stats, nil
 }
 
 func (r *UserRepository) FilterUser(query *model.FindAllUserRequest) func(tx *gorm.DB) *gorm.DB {

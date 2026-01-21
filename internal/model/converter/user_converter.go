@@ -11,10 +11,8 @@ func UserToResponse(user *entity.User) *model.UserResponse {
 		Username:   user.Username,
 		Fullname:   user.Fullname,
 		Role:       user.Role,
-		Token:      user.Token,
 		IsActive:   user.IsActive,
 		LastActive: user.LastActive,
 		CreatedAt:  user.CreatedAt,
-		UpdatedAt:  user.UpdatedAt,
 	}
 }

@@ -8,12 +8,15 @@ import (
 )
 
 var (
-	InternalServerError = fiber.NewError(fiber.StatusInternalServerError, "internal server error")
+	InvalidUploadedFileError   = fiber.NewError(fiber.StatusBadRequest, "invalid uploaded file")
+	InvalidCsvFormatError      = fiber.NewError(fiber.StatusUnprocessableEntity, "only accept csv format")
+	ExceedMaximumFileSizeError = fiber.NewError(fiber.StatusUnprocessableEntity, "system only accept uploaded file size below 10MB")
+	InternalServerError        = fiber.NewError(fiber.StatusInternalServerError, "internal server error")
 )
 
 func NewErrorHandler() fiber.ErrorHandler {
 	return func(ctx *fiber.Ctx, err error) error {
-		var errors any
+		var errors any = fiber.ErrInternalServerError.Message
 
 		code := fiber.StatusInternalServerError
 		if e, ok := err.(*fiber.Error); ok {

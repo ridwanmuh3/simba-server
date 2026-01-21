@@ -14,7 +14,6 @@ func NewAuthMiddleware(logger *zap.SugaredLogger, userService *service.UserServi
 		request := &model.VerifyUserRequest{
 			Token: c.Cookies("token", "NOT_FOUND"),
 		}
-		logger.Debugf("token cookie: %s", request.Token)
 
 		auth, err := userService.Verify(c.UserContext(), request)
 		if err != nil {
@@ -22,12 +21,16 @@ func NewAuthMiddleware(logger *zap.SugaredLogger, userService *service.UserServi
 			return exception.UserUnauthorizedError
 		}
 
-		logger.Debugf("user: %v", auth)
+		logger.Debugf("user: %v", auth.Fullname)
 		c.Locals("auth", auth)
 		return c.Next()
 	}
 }
 
 func GetAuthUser(c *fiber.Ctx) *model.Auth {
-	return c.Locals("auth").(*model.Auth)
+	auth := c.Locals("auth")
+	if auth == nil {
+		return nil
+	}
+	return auth.(*model.Auth)
 }

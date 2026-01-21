@@ -43,7 +43,7 @@ func (s *UserService) Create(ctx context.Context, request *model.CreateUserReque
 	count, err := s.userRepository.CountByUsername(tx, request.Username)
 	if err != nil {
 		s.log.Errorf("failed to count user by username: %v", err)
-		return nil, exception.UserNotFoundError
+		return nil, exception.InternalServerError
 	}
 
 	if count > 0 {
@@ -92,15 +92,8 @@ func (s *UserService) Update(ctx context.Context, request *model.UpdateUserReque
 		return nil, exception.UserNotFoundError
 	}
 
-	if request.OldPassword != "" {
-		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(request.OldPassword)); err != nil {
-			s.log.Errorf("failed to compare user password: %v", err)
-			return nil, exception.UserPasswordNotMatch
-		}
-	}
-
-	if request.NewPassword != "" {
-		hashPassword, err := bcrypt.GenerateFromPassword([]byte(request.NewPassword), bcrypt.DefaultCost)
+	if request.Password != "" {
+		hashPassword, err := bcrypt.GenerateFromPassword([]byte(request.Password), bcrypt.DefaultCost)
 		if err != nil {
 			s.log.Errorf("failed to hash new password: %v", err)
 			return nil, exception.InternalServerError
@@ -136,6 +129,25 @@ func (s *UserService) Delete(ctx context.Context, request *model.DeleteUserReque
 	if err := s.userRepository.FindById(tx, user, request.ID); err != nil {
 		s.log.Errorf("failed to find user by id: %v", err)
 		return false, exception.UserNotFoundError
+	}
+
+	if request.AuthID == request.ID {
+		s.log.Errorf("you are not allowed to self delete account")
+		return false, exception.UserCannotSelfDeleteError
+	}
+
+	if user.Role == "Super Admin" {
+		var count int64
+		tx.Model(user).Where("role = ?", user.Role).Count(&count)
+		if count <= 1 {
+			s.log.Errorf("failed to delete last super admin user. system must have one super admin user")
+			return false, exception.UserDeleteSingleSuperAdminError
+		}
+	}
+
+	if user.IsActive {
+		s.log.Errorf("failed to delete currently active user")
+		return false, exception.UserDeleteActiveUserError
 	}
 
 	if err := s.userRepository.Delete(tx, user); err != nil {
@@ -200,4 +212,27 @@ func (s *UserService) FindAll(ctx context.Context, request *model.FindAllUserReq
 	}
 
 	return responses, total, nil
+}
+
+func (s *UserService) GetUsersStats(ctx context.Context) (*model.UsersStatsResponse, error) {
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+
+	stats, err := s.userRepository.GetUsersStats(tx)
+	if err != nil {
+		s.log.Errorf("failed to get users statistics: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		s.log.Errorf("failed to commit database transaction: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	return &model.UsersStatsResponse{
+		UsersTotal:           stats.Total,
+		UsersSuperAdminTotal: stats.SuperAdmin,
+		UsersAdminTotal:      stats.Admin,
+		UsersActiveTotal:     stats.Active,
+	}, nil
 }

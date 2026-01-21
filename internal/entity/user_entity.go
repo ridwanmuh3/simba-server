@@ -20,3 +20,10 @@ type User struct {
 func (u *User) TableName() string {
 	return "users"
 }
+
+type UserStats struct {
+	Total      int64 `gorm:"column:total"`
+	SuperAdmin int64 `gorm:"column:super_admin"`
+	Admin      int64 `gorm:"column:admin"`
+	Active     int64 `gorm:"column:active"`
+}

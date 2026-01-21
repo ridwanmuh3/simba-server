@@ -2,18 +2,21 @@ package model
 
 import "time"
 
-var UserRoles = []string{"Admin", "Super Admin"}
-
 type UserResponse struct {
 	ID         int       `json:"id,omitempty"`
 	Username   string    `json:"username,omitempty"`
 	Fullname   string    `json:"fullname,omitempty"`
 	Role       string    `json:"role,omitempty"`
-	Token      string    `json:"token,omitempty"`
 	IsActive   bool      `json:"is_active,omitempty"`
 	LastActive time.Time `json:"last_active,omitzero"`
 	CreatedAt  time.Time `json:"created_at,omitzero"`
-	UpdatedAt  time.Time `json:"updated_at,omitzero"`
+}
+
+type UsersStatsResponse struct {
+	UsersTotal           int64 `json:"users_total,omitempty"`
+	UsersSuperAdminTotal int64 `json:"users_super_admin_total,omitempty"`
+	UsersAdminTotal      int64 `json:"users_admin_total,omitempty"`
+	UsersActiveTotal     int64 `json:"users_active_total,omitempty"`
 }
 
 type CreateUserRequest struct {
@@ -24,18 +27,18 @@ type CreateUserRequest struct {
 }
 
 type UpdateUserRequest struct {
-	ID          int    `json:"-" validate:"required,numeric,min=0"`
-	Fullname    string `json:"fullname,omitempty" validate:"omitempty,alphaspace,min=2,max=50"`
-	OldPassword string `json:"old_password,omitempty" validate:"omitempty,printascii,required_with=NewPassword,min=4,max=30"`
-	NewPassword string `json:"new_password,omitempty" validate:"omitempty,printascii,nefield=OldPassword,min=4,max=30"`
+	ID       int    `json:"-" validate:"required,numeric,min=0"`
+	Fullname string `json:"fullname,omitempty" validate:"omitempty,alphaspace,min=2,max=50"`
+	Password string `json:"old_password,omitempty" validate:"omitempty,printascii,min=4,max=30"`
 }
 
 type DeleteUserRequest struct {
-	ID int `json:"id" validate:"required,numeric,min=0"`
+	AuthID int `json:"-" validate:"required,numeric"`
+	ID     int `json:"id" validate:"required,numeric"`
 }
 
 type FindByIdUserRequest struct {
-	ID int `json:"id" validate:"required,numeric,min=0"`
+	ID int `json:"id" validate:"required,numeric"`
 }
 
 type FindAllUserRequest struct {

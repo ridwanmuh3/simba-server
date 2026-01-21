@@ -1,12 +1,7 @@
 package route
 
 import (
-	"bufio"
-	"fmt"
-	"time"
-
 	"github.com/gofiber/fiber/v2"
-	"github.com/valyala/fasthttp"
 	"go.uber.org/zap"
 
 	"github.com/ridwanmuh3/simba-server/internal/delivery/handler"
@@ -17,6 +12,7 @@ import (
 type RouteConfig struct {
 	App            *fiber.App
 	UserHandler    *handler.UserHandler
+	ItemHandler    *handler.ItemHandler
 	AuthMiddleware fiber.Handler
 	Log            *zap.SugaredLogger
 }
@@ -25,13 +21,14 @@ func (c *RouteConfig) Setup() {
 	c.SetupPublicRoute()
 	c.SetupAuthRoute()
 	c.SetupUserRoute()
+	c.SetupItemRoute()
 }
 
 func (c *RouteConfig) SetupPublicRoute() {
 	c.App.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(model.Response[any]{
 			Status:  fiber.StatusOK,
-			Message: "welcome to simba api",
+			Message: "Welcome to  SIMBA API!",
 		})
 	})
 }
@@ -53,66 +50,22 @@ func (c *RouteConfig) SetupUserRoute() {
 	userRoute.Post("/", c.UserHandler.Create)
 	userRoute.Put("/:id", c.UserHandler.Update)
 	userRoute.Delete("/:id", c.UserHandler.Delete)
+	userRoute.Get("/stats", c.UserHandler.GetUsersStats)
 	userRoute.Get("/:id", c.UserHandler.FindById)
 	userRoute.Get("/", c.UserHandler.FindAll)
+
 }
 
-func (c *RouteConfig) SetupSSE() {
-	var sseQueue []*model.EventPayload[any]
+func (c *RouteConfig) SetupItemRoute() {
+	itemRoute := c.App.Group("/api/items")
 
-	// global route
-	c.App.Get("/api/notifications", func(c *fiber.Ctx) error {
-		c.Set("Content-Type", "text/event-stream")
-		c.Set("Cache-Control", "no-cache")
-		c.Set("Connection", "keep-alive")
-		c.Set("Transfer-Encoding", "chunked")
-
-		c.Status(fiber.StatusOK).Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
-			fmt.Println("WRITER")
-			var i int
-			for {
-				i++
-
-				var msg string
-
-				// if there are messages that have been sent to the `/publish` endpoint
-				// then use these first, otherwise just send the current time
-				if len(sseQueue) > 0 {
-					msg = fmt.Sprintf("%d - message recieved: %s", i, sseQueue[0])
-					// remove the message from the buffer
-					sseQueue = sseQueue[1:]
-				} else {
-					msg = fmt.Sprintf("%d - the time is %v", i, time.Now())
-				}
-
-				fmt.Fprintf(w, "data: Message: %s\n\n", msg)
-				fmt.Println(msg)
-
-				err := w.Flush()
-				if err != nil {
-					// Refreshing page in web browser will establish a new
-					// SSE connection, but only (the last) one is alive, so
-					// dead connections must be closed here.
-					fmt.Printf("Error while flushing: %v. Closing http connection.\n", err)
-
-					break
-				}
-				time.Sleep(2 * time.Second)
-			}
-		}))
-
-		return nil
-	})
-
-	c.App.Post("/api/notifications/publish", func(c *fiber.Ctx) error {
-		payload := new(model.EventPayload[any])
-
-		if err := c.BodyParser(payload); err != nil {
-			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
-		}
-
-		sseQueue = append(sseQueue, payload)
-
-		return c.SendString("Message added to queue\n")
-	})
+	// setup scope middleware
+	itemRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"))
+	itemRoute.Post("/", c.ItemHandler.Add)
+	itemRoute.Post("/import", c.ItemHandler.ImportItems)
+	itemRoute.Put("/:id", c.ItemHandler.Update)
+	itemRoute.Delete("/:id", c.ItemHandler.Delete)
+	itemRoute.Get("/export", c.ItemHandler.ExportItems)
+	itemRoute.Get("/:id", c.ItemHandler.FindById)
+	itemRoute.Get("/", c.ItemHandler.FindAll)
 }

@@ -27,14 +27,18 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		expirationTimeEnv = 30
 	}
 
-	expirationTime := time.Now().Add(time.Duration(expirationTimeEnv) * time.Minute)
+	var expirationTime time.Time
+	if request.RememberMe {
+		expirationTime = time.Now().Add(time.Duration(24) * time.Hour)
+	} else {
+		expirationTime = time.Now().Add(time.Duration(expirationTimeEnv) * time.Minute)
+	}
 
 	c.Cookie(&fiber.Cookie{
 		Name:     "token",
 		Value:    response.Token,
 		Path:     "/",
 		Expires:  expirationTime,
-		MaxAge:   int(expirationTime.Unix()),
 		HTTPOnly: true,
 		// Secure: true,
 	})
@@ -62,7 +66,7 @@ func (h *UserHandler) Logout(c *fiber.Ctx) error {
 		Name:     "token",
 		Value:    "",
 		Path:     "/",
-		Expires:  time.Now().Add(-time.Hour),
+		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 		HTTPOnly: true,
 		// Secure: true,
@@ -87,9 +91,15 @@ func (h *UserHandler) Current(c *fiber.Ctx) error {
 		return err
 	}
 
-	return c.JSON(model.Response[*model.UserResponse]{
+	authData := model.Auth{
+		ID:       response.ID,
+		Fullname: response.Fullname,
+		Role:     response.Role,
+	}
+
+	return c.JSON(model.Response[model.Auth]{
 		Status:  fiber.StatusOK,
 		Message: "get current auth user success",
-		Data:    response,
+		Data:    authData,
 	})
 }

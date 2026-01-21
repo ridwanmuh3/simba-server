@@ -26,31 +26,38 @@ type BootstrapConfig struct {
 }
 
 func Bootstrap(config *BootstrapConfig) {
-	SetupGlobalMiddlewares(config)
-
+	// repositories
 	userRepository := repository.NewUserRepository()
+	itemRepository := repository.NewItemRepository()
 
+	// services
 	userService := service.NewUserService(config.DB, config.Log, config.Validate, userRepository)
+	itemService := service.NewItemService(config.DB, config.Log, config.Validate, itemRepository)
 
+	// handler
 	userHandler := handler.NewUserHandler(config.Config, config.Log, userService)
+	itemHandler := handler.NewItemHandler(config.Config, config.Log, itemService)
 
 	authMiddleware := middleware.NewAuthMiddleware(config.Log, userService)
 
 	routeConfig := &route.RouteConfig{
 		App:            config.App,
 		UserHandler:    userHandler,
+		ItemHandler:    itemHandler,
 		AuthMiddleware: authMiddleware,
 		Log:            config.Log,
 	}
 
+	SetupGlobalMiddlewares(config)
 	routeConfig.Setup()
 }
 
 func SetupGlobalMiddlewares(config *BootstrapConfig) {
-	// global middlewares
 	config.App.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowHeaders: "Cache-Control",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowCredentials: true,
+		AllowMethods:     "GET, POST, HEAD, PUT, DELETE, PATCH",
+		AllowOrigins:     "http://localhost:9091",
 	}))
 
 	config.App.Use(recover.New())

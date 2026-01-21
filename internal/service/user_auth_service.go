@@ -2,20 +2,17 @@ package service
 
 import (
 	"context"
-	"crypto/sha3"
-	"encoding/base64"
 	"time"
 
-	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/exception"
 	"github.com/ridwanmuh3/simba-server/internal/model"
-	"github.com/ridwanmuh3/simba-server/internal/model/converter"
+	"github.com/ridwanmuh3/simba-server/internal/util"
 )
 
-func (s *UserService) Login(ctx context.Context, request *model.LoginUserRequest) (*model.UserResponse, error) {
+func (s *UserService) Login(ctx context.Context, request *model.LoginUserRequest) (*model.TokenResponse, error) {
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
 
@@ -27,21 +24,15 @@ func (s *UserService) Login(ctx context.Context, request *model.LoginUserRequest
 	user := new(entity.User)
 	if err := s.userRepository.FindByUsername(tx, user, request.Username); err != nil {
 		s.log.Errorf("failed to find user by username: %v", err)
-		return nil, exception.UserUnauthorizedError
+		return nil, exception.UserNotFoundError
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(request.Password)); err != nil {
 		s.log.Errorf("failed to compare password: %v", err)
-		return nil, exception.UserUnauthorizedError
+		return nil, exception.UserPasswordNotMatch
 	}
 
-	token, err := s.GenerateToken()
-	if err != nil {
-		s.log.Errorf("failed to generate token: %v", err)
-		return nil, exception.InternalServerError
-	}
-
-	user.Token = token
+	user.Token = util.GenerateRandomString(64)
 	user.IsActive = true
 	user.LastActive = time.Now()
 
@@ -55,7 +46,9 @@ func (s *UserService) Login(ctx context.Context, request *model.LoginUserRequest
 		return nil, exception.InternalServerError
 	}
 
-	return converter.UserToTokenResponse(user), nil
+	return &model.TokenResponse{
+		Token: user.Token,
+	}, nil
 }
 
 func (s *UserService) Logout(ctx context.Context, request *model.LogoutUserRequest) (bool, error) {
@@ -115,17 +108,4 @@ func (s *UserService) Verify(ctx context.Context, request *model.VerifyUserReque
 		Fullname: user.Fullname,
 		Role:     user.Role,
 	}, nil
-}
-
-func (s *UserService) GenerateToken() (string, error) {
-	rawToken := uuid.New()
-
-	bcryptHashToken, err := bcrypt.GenerateFromPassword(rawToken[:], bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-
-	hashToken := sha3.Sum256(bcryptHashToken)
-
-	return base64.RawURLEncoding.EncodeToString(hashToken[:]), nil
 }

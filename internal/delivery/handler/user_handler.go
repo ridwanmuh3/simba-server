@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
+	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/service"
 )
@@ -75,6 +76,7 @@ func (h *UserHandler) Update(c *fiber.Ctx) error {
 }
 
 func (h *UserHandler) Delete(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
 	userId, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		h.log.Warnf("failed to parse user id: %v", err)
@@ -82,12 +84,13 @@ func (h *UserHandler) Delete(c *fiber.Ctx) error {
 	}
 
 	request := &model.DeleteUserRequest{
-		ID: userId,
+		AuthID: auth.ID,
+		ID:     userId,
 	}
 
 	response, err := h.userService.Delete(c.Context(), request)
 	if err != nil {
-		h.log.Warnf("failed to find user by id: %v", err)
+		h.log.Warnf("failed to delete user by id: %v", err)
 		return err
 	}
 
@@ -147,5 +150,19 @@ func (h *UserHandler) FindAll(c *fiber.Ctx) error {
 		Message: "find all users success",
 		Data:    response,
 		Paging:  pagingMetadata,
+	})
+}
+
+func (h *UserHandler) GetUsersStats(c *fiber.Ctx) error {
+	response, err := h.userService.GetUsersStats(c.Context())
+	if err != nil {
+		h.log.Warnf("failed to get users statistics: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[*model.UsersStatsResponse]{
+		Status:  fiber.StatusOK,
+		Message: "get users statistics success",
+		Data:    response,
 	})
 }
