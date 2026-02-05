@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bufio"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -9,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
@@ -88,7 +86,7 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 	defer src.Close()
 
 	reader := csv.NewReader(src)
-	reader.FieldsPerRecord = -1
+	reader.FieldsPerRecord = 5
 
 	var items []model.AddItemRequest
 	lineCount := 0
@@ -98,34 +96,54 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 		if err == io.EOF {
 			break
 		}
+
+		lineCount++
+
 		if err != nil {
+			if err == csv.ErrFieldCount {
+				h.log.Warnf("CSV line %d: incorrect column count", lineCount)
+				return exception.InvalidCsvFormatError
+			}
 			h.log.Warnf("error reading csv line %d: %v", lineCount, err)
 			return exception.InvalidCsvFormatError
 		}
 
-		if lineCount == 0 {
-			lineCount++
+		// Skip Header
+		if lineCount == 1 {
 			continue
 		}
 
-		if len(record) < 5 {
-			return exception.ItemCsvTooMuchColumnError
+		if strings.TrimSpace(record[0]) == "" {
+			h.log.Warnf("CSV line %d: name is empty", lineCount)
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Baris %d: Nama barang tidak boleh kosong", lineCount))
 		}
 
-		qty, _ := strconv.Atoi(record[2])
-		price, _ := strconv.ParseFloat(record[4], 64)
+		stock, err := strconv.Atoi(record[2])
+		if err != nil || stock < 0 {
+			h.log.Warnf("CSV line %d: invalid stock format '%s'", lineCount, record[2])
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Baris %d: Format stok salah (harus angka)", lineCount))
+		}
+
+		price, err := strconv.ParseFloat(record[4], 64)
+		if err != nil || price < 0 {
+			h.log.Warnf("CSV line %d: invalid price format '%s'", lineCount, record[4])
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Baris %d: Format harga salah (harus angka)", lineCount))
+		}
 
 		item := model.AddItemRequest{
-			Name:        record[0],
-			Category:    record[1],
-			Quantity:    qty,
-			MeasureUnit: record[3],
+			Name:        strings.TrimSpace(record[0]),
+			Category:    strings.TrimSpace(record[1]),
+			Stock:       stock,
+			MeasureUnit: strings.TrimSpace(record[3]),
 			UnitPrice:   price,
 			ModifiedBy:  auth.Fullname,
 		}
 
 		items = append(items, item)
-		lineCount++
+	}
+
+	if len(items) == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "File CSV tidak berisi data barang")
 	}
 
 	if len(items) > 0 {
@@ -136,49 +154,25 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(fiber.Map{
-		"status":  "success",
-		"message": "items imported successfully",
-		"count":   len(items),
+	return c.JSON(model.Response[int]{
+		Status:  fiber.StatusCreated,
+		Message: "items imported successfully",
+		Data:    len(items),
 	})
 }
 
 func (h *ItemHandler) ExportItems(c *fiber.Ctx) error {
-	items, _, err := h.itemService.FindAll(c.Context(), nil)
+	items, _, err := h.itemService.ExportItems(c.Context())
 	if err != nil {
 		h.log.Warnf("failed to find all items: %v", err)
 		return err
 	}
 
-	filename := fmt.Sprintf("./tmp/export-barang-%v.csv", time.Now().Format("02-01-2006-15-04-05"))
-	c.Set("Content-Type", "text/csv")
-	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-
-	c.Context().Response.SetBodyStreamWriter(func(w *bufio.Writer) {
-		csvWriter := csv.NewWriter(w)
-		csvWriter.Write([]string{"Kode", "Nama", "Kategori", "Jumlah Barang", "Harga Satuan", "Total Harga"})
-
-		for _, item := range items {
-			if err := csvWriter.Write([]string{
-				item.ID,
-				item.Name,
-				item.Category,
-				strconv.Itoa(item.Quantity) + item.MeasureUnit,
-				strconv.FormatFloat(item.UnitPrice, 'f', 2, 64),
-				strconv.FormatFloat(item.TotalPrice, 'f', 2, 64),
-			}); err != nil {
-				h.log.Warnf("failed to write item stream: %v", err)
-				return
-			}
-		}
-
-		csvWriter.Flush()
-		if err := csvWriter.Error(); err != nil {
-			h.log.Warnf("error flushing csv: %v", err)
-		}
+	return c.JSON(model.Response[[]model.ItemResponse]{
+		Status:  fiber.StatusOK,
+		Message: "export items success",
+		Data:    items,
 	})
-
-	return nil
 }
 
 func (h *ItemHandler) Update(c *fiber.Ctx) error {
@@ -186,7 +180,7 @@ func (h *ItemHandler) Update(c *fiber.Ctx) error {
 
 	request := new(model.UpdateItemRequest)
 	if err := c.ParamsParser(request); err != nil {
-		h.log.Warnf("failed to parse request body: %v", err)
+		h.log.Warnf("failed to parse request params: %v", err)
 		return err
 	}
 
@@ -210,6 +204,35 @@ func (h *ItemHandler) Update(c *fiber.Ctx) error {
 	})
 }
 
+func (h *ItemHandler) UpdateStock(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
+	request := new(model.UpdateItemStockRequest)
+	if err := c.ParamsParser(request); err != nil {
+		h.log.Warnf("failed to parse request params: %v", err)
+		return err
+	}
+
+	if err := c.BodyParser(request); err != nil {
+		h.log.Warnf("failed to parse request body: %v", err)
+		return err
+	}
+
+	request.ModifiedBy = auth.Fullname
+
+	response, err := h.itemService.UpdateStock(c.Context(), request)
+	if err != nil {
+		h.log.Warnf("failed to update item stock: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[*model.StockResponse]{
+		Status:  fiber.StatusOK,
+		Message: "update stock item success",
+		Data:    response,
+	})
+}
+
 func (h *ItemHandler) Delete(c *fiber.Ctx) error {
 	request := new(model.DeleteItemRequest)
 	if err := c.ParamsParser(request); err != nil {
@@ -226,6 +249,26 @@ func (h *ItemHandler) Delete(c *fiber.Ctx) error {
 	return c.JSON(model.Response[bool]{
 		Status:  fiber.StatusOK,
 		Message: "delete item success",
+		Data:    response,
+	})
+}
+
+func (h *ItemHandler) DeleteStock(c *fiber.Ctx) error {
+	request := new(model.DeleteStockRequest)
+	if err := c.ParamsParser(request); err != nil {
+		h.log.Warnf("failed to parse request body: %v", err)
+		return err
+	}
+
+	response, err := h.itemService.DeleteStock(c.Context(), request)
+	if err != nil {
+		h.log.Warnf("failed to delete stock item: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[bool]{
+		Status:  fiber.StatusOK,
+		Message: "delete stock item success",
 		Data:    response,
 	})
 }
@@ -275,6 +318,37 @@ func (h *ItemHandler) FindAll(c *fiber.Ctx) error {
 	return c.JSON(model.Response[[]model.ItemResponse]{
 		Status:  fiber.StatusOK,
 		Message: "find all items success",
+		Data:    response,
+		Paging:  pagingMetadata,
+	})
+}
+
+func (h *ItemHandler) FindAllStocks(c *fiber.Ctx) error {
+	request := &model.FindAllStocksRequest{
+		SearchQuery: c.Query("search_query", ""),
+		StartDate:   c.Query("start_date", ""),
+		EndDate:     c.Query("end_date", ""),
+		Page:        c.QueryInt("page", 1),
+		Size:        c.QueryInt("size", 10),
+		Type:        c.Query("type", "ALL"),
+	}
+
+	response, total, err := h.itemService.FindAllStocks(c.Context(), request)
+	if err != nil {
+		h.log.Warnf("failed to find all items stocks: %v", err)
+		return err
+	}
+
+	pagingMetadata := &model.PageMetadata{
+		Page:      request.Page,
+		Size:      request.Size,
+		TotalItem: total,
+		TotalPage: int64(math.Ceil(float64(total) / float64(request.Size))),
+	}
+
+	return c.JSON(model.Response[[]model.StockResponse]{
+		Status:  fiber.StatusOK,
+		Message: "find all items stocks success",
 		Data:    response,
 		Paging:  pagingMetadata,
 	})

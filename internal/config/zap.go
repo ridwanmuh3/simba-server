@@ -24,10 +24,10 @@ func NewLogger() *zap.SugaredLogger {
 	zapConfig := zap.NewDevelopmentConfig()
 	zapConfig.OutputPaths = []string{
 		// logFileName,
-		"stderr",
+		"stdout",
 	}
 
-	log, err := zapConfig.Build()
+	log, err := zapConfig.Build(zap.AddStacktrace(zap.ErrorLevel))
 	if err != nil {
 		panic(fmt.Errorf("failed to instantiate logger: %v", err))
 	}

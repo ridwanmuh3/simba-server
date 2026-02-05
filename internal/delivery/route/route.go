@@ -10,9 +10,10 @@ import (
 )
 
 type RouteConfig struct {
-	App            *fiber.App
-	UserHandler    *handler.UserHandler
-	ItemHandler    *handler.ItemHandler
+	App         *fiber.App
+	UserHandler *handler.UserHandler
+	ItemHandler *handler.ItemHandler
+	// StorageHandler *handler.StorageHandler
 	AuthMiddleware fiber.Handler
 	Log            *zap.SugaredLogger
 }
@@ -22,16 +23,21 @@ func (c *RouteConfig) Setup() {
 	c.SetupAuthRoute()
 	c.SetupUserRoute()
 	c.SetupItemRoute()
+	// c.SetupStorageRoute()
 }
 
 func (c *RouteConfig) SetupPublicRoute() {
 	c.App.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(model.Response[any]{
 			Status:  fiber.StatusOK,
-			Message: "Welcome to  SIMBA API!",
+			Message: "Welcome to SIMBA API!",
 		})
 	})
 }
+
+// func (c *RouteConfig) SetupStorageRoute() {
+// 	c.App.Get("/api/storage/:filename", c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Super Admin", "Admin"), c.StorageHandler.Download)
+// }
 
 func (c *RouteConfig) SetupAuthRoute() {
 	authRoute := c.App.Group("/api/auth")
@@ -44,7 +50,6 @@ func (c *RouteConfig) SetupAuthRoute() {
 func (c *RouteConfig) SetupUserRoute() {
 	userRoute := c.App.Group("/api/users")
 
-	// setup scope middleware
 	userRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Super Admin"))
 
 	userRoute.Post("/", c.UserHandler.Create)
@@ -59,13 +64,16 @@ func (c *RouteConfig) SetupUserRoute() {
 func (c *RouteConfig) SetupItemRoute() {
 	itemRoute := c.App.Group("/api/items")
 
-	// setup scope middleware
 	itemRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"))
+
 	itemRoute.Post("/", c.ItemHandler.Add)
 	itemRoute.Post("/import", c.ItemHandler.ImportItems)
+	itemRoute.Put("/:id/stocks", c.ItemHandler.UpdateStock)
 	itemRoute.Put("/:id", c.ItemHandler.Update)
+	itemRoute.Delete("/:id/stocks/:stock_id", c.ItemHandler.DeleteStock)
 	itemRoute.Delete("/:id", c.ItemHandler.Delete)
 	itemRoute.Get("/export", c.ItemHandler.ExportItems)
+	itemRoute.Get("/stocks", c.ItemHandler.FindAllStocks)
 	itemRoute.Get("/:id", c.ItemHandler.FindById)
 	itemRoute.Get("/", c.ItemHandler.FindAll)
 }

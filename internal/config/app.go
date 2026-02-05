@@ -33,17 +33,20 @@ func Bootstrap(config *BootstrapConfig) {
 	// services
 	userService := service.NewUserService(config.DB, config.Log, config.Validate, userRepository)
 	itemService := service.NewItemService(config.DB, config.Log, config.Validate, itemRepository)
+	// storageService := service.NewStorageService(config.Log, config.Validate)
 
 	// handler
 	userHandler := handler.NewUserHandler(config.Config, config.Log, userService)
 	itemHandler := handler.NewItemHandler(config.Config, config.Log, itemService)
+	// storageHandler := handler.NewStorageHandler(config.Config, config.Log, storageService)
 
 	authMiddleware := middleware.NewAuthMiddleware(config.Log, userService)
 
 	routeConfig := &route.RouteConfig{
-		App:            config.App,
-		UserHandler:    userHandler,
-		ItemHandler:    itemHandler,
+		App:         config.App,
+		UserHandler: userHandler,
+		ItemHandler: itemHandler,
+		// StorageHandler: storageHandler,
 		AuthMiddleware: authMiddleware,
 		Log:            config.Log,
 	}

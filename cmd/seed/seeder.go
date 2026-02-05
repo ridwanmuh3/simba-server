@@ -19,6 +19,12 @@ func main() {
 
 	users := []*model.CreateUserRequest{
 		{
+			Username: "superadmin1",
+			Password: "superadmin1",
+			Fullname: "Budi Almaliki",
+			Role:     "Super Admin",
+		},
+		{
 			Username: "superadmin2",
 			Password: "superadmin2",
 			Fullname: "Budi Santoso",
@@ -165,9 +171,12 @@ func main() {
 		},
 	}
 
+	var err any
 	for _, user := range users {
-		userService.Create(context.Background(), user)
+		_, err = userService.Create(context.Background(), user)
 	}
 
-	log.Info("seeding test user success")
+	if err == nil {
+		log.Info("seeding test user success")
+	}
 }

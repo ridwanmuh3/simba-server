@@ -10,9 +10,23 @@ func ItemToResponse(item *entity.Item) *model.ItemResponse {
 		ID:          item.ID,
 		Name:        item.Name,
 		Category:    item.Category,
-		Quantity:    item.Quantity,
+		Stock:       item.Stock,
 		MeasureUnit: item.MeasureUnit,
 		UnitPrice:   item.UnitPrice,
 		TotalPrice:  item.TotalPrice,
+	}
+}
+
+func StockToResponse(stockTracking *entity.StockTracking) *model.StockResponse {
+	return &model.StockResponse{
+		ID:            int(stockTracking.ID),
+		Type:          stockTracking.Type,
+		Amount:        stockTracking.Amount,
+		PreviousStock: stockTracking.PreviousStock,
+		NewStock:      stockTracking.NewStock,
+		Supplier:      stockTracking.Supplier,
+		ModifiedBy:    stockTracking.ModifiedBy,
+		CreatedAt:     stockTracking.CreatedAt,
+		Item:          *ItemToResponse(&stockTracking.Item),
 	}
 }

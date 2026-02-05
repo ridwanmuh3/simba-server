@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"slices"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/model"
@@ -18,12 +20,15 @@ func NewItemRepository() *ItemRepository {
 }
 
 func (r *ItemRepository) AddBatches(db *gorm.DB, items []entity.Item) error {
-	return db.CreateInBatches(items, len(items)).Error
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"stock", "unit_price", "modified_by"}),
+	}).Create(&items).Error
 }
 
 func (r *ItemRepository) FindAll(db *gorm.DB, query *model.FindAllItemsRequest) ([]entity.Item, int64, error) {
 	var items []entity.Item
-	if err := db.Scopes(r.FilterItem(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Find(&items).Error; err != nil {
+	if err := db.Scopes(r.FilterItem(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order("id ASC").Find(&items).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -33,6 +38,20 @@ func (r *ItemRepository) FindAll(db *gorm.DB, query *model.FindAllItemsRequest) 
 	}
 
 	return items, total, nil
+}
+
+func (r *ItemRepository) FindAllStocks(db *gorm.DB, query *model.FindAllStocksRequest) ([]entity.StockTracking, int64, error) {
+	var stocks []entity.StockTracking
+	if err := db.Preload("Item").Scopes(r.FilterStock(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order("created_at DESC").Find(&stocks).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var total int64
+	if err := db.Model(&entity.StockTracking{}).Scopes(r.FilterStock(query)).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return stocks, total, nil
 }
 
 func (r *ItemRepository) CountByName(db *gorm.DB, name string) (int64, error) {
@@ -51,7 +70,7 @@ func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *g
 	return func(tx *gorm.DB) *gorm.DB {
 		if searchQuery := query.SearchQuery; searchQuery != "" {
 			searchQuery = "%" + searchQuery + "%"
-			tx = tx.Where("code ILIKE ? OR name ILIKE ? OR category ILIKE ?", searchQuery, searchQuery, searchQuery)
+			tx = tx.Where("id ILIKE ? OR name ILIKE ? OR category ILIKE ?", searchQuery, searchQuery, searchQuery)
 		}
 
 		const layout = "2006-01-02"
@@ -72,6 +91,50 @@ func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *g
 					parsedEnd.Location(),
 				)
 				tx = tx.Where("created_at <= ?", endOfDay)
+			}
+		}
+
+		return tx
+	}
+}
+
+func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx *gorm.DB) *gorm.DB {
+	return func(tx *gorm.DB) *gorm.DB {
+		tx = tx.Joins("LEFT JOIN items AS item ON item.id = stock_tracking.item_id")
+
+		if searchQuery := query.SearchQuery; searchQuery != "" && len(searchQuery) > 0 {
+			searchPattern := "%" + searchQuery + "%"
+			tx = tx.Where(
+				tx.Where("stock_tracking.item_id ILIKE ?", searchPattern).
+					Or("item.name ILIKE ?", searchPattern).
+					Or("item.category ILIKE ?", searchPattern).
+					Or("stock_tracking.supplier ILIKE ?", searchPattern),
+			)
+		}
+
+		if slices.Contains([]string{"IN", "OUT", "ALL"}, query.Type) {
+			tx = tx.Where("stock_tracking.type = ?", query.Type)
+		}
+
+		const layout = "2006-01-02"
+
+		if query.StartDate != "" && len(query.StartDate) > 0 {
+			if parsedStart, err := time.Parse(layout, query.StartDate); err == nil {
+				startOfDay := time.Date(
+					parsedStart.Year(), parsedStart.Month(), parsedStart.Day(),
+					0, 0, 0, 0, time.Local,
+				)
+				tx = tx.Where("stock_tracking.created_at >= ?", startOfDay)
+			}
+		}
+
+		if query.EndDate != "" && len(query.EndDate) > 0 {
+			if parsedEnd, err := time.Parse(layout, query.EndDate); err == nil {
+				endOfDay := time.Date(
+					parsedEnd.Year(), parsedEnd.Month(), parsedEnd.Day(),
+					23, 59, 59, 999999999, time.Local,
+				)
+				tx = tx.Where("stock_trackings.created_at <= ?", endOfDay)
 			}
 		}
 

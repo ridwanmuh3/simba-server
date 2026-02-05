@@ -31,7 +31,7 @@ func (r *UserRepository) FindByUsername(db *gorm.DB, user *entity.User, username
 
 func (r *UserRepository) FindAll(db *gorm.DB, query *model.FindAllUserRequest) ([]entity.User, int64, error) {
 	var users []entity.User
-	if err := db.Scopes(r.FilterUser(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Find(&users).Error; err != nil {
+	if err := db.Scopes(r.FilterUser(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order("last_active DESC").Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
 
