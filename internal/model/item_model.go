@@ -60,7 +60,7 @@ type DeleteItemRequest struct {
 
 type DeleteStockRequest struct {
 	ID      string `param:"id" validate:"required,printascii"`
-	StockID int    `param:"stock_id" validate:"required,numeric"`
+	StockID int    `param:"stock_id" validate:"required,number"`
 }
 
 type FindByIdItemRequest struct {

@@ -246,7 +246,7 @@ func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItem
 		return nil, exception.InternalServerError
 	}
 
-	return nil, nil
+	return converter.StockToResponse(stockTracking), nil
 }
 
 func (s *ItemService) Delete(ctx context.Context, request *model.DeleteItemRequest) (bool, error) {
@@ -293,15 +293,30 @@ func (s *ItemService) DeleteStock(ctx context.Context, request *model.DeleteStoc
 	}
 
 	stock := new(entity.StockTracking)
-	if err := tx.Where("id = ? AND item_id = ?", request.ID, request.StockID).First(stock).Error; err != nil {
+	if err := tx.Where("id = ? AND item_id = ?", request.StockID, request.ID).First(stock).Error; err != nil {
 		s.log.Errorf("failed to find stock item by id: %v", err)
 		return false, exception.ItemNotFoundError
 	}
 
-	item.Stock = stock.PreviousStock
+	switch stock.Type {
+	case "IN":
+		item.Stock = item.Stock - stock.Amount
+	case "OUT":
+		item.Stock = item.Stock + stock.Amount
+	}
 
-	if err := tx.Where("id = ? AND item_id = ?", request.ID, item.ID).Delete(stock).Error; err != nil {
+	if item.Stock < 0 {
+		s.log.Errorf("deletion resulted in negative stock")
+		return false, fiber.NewError(fiber.StatusBadRequest, "reducing this stock item will resulting negative stock")
+	}
+
+	if err := tx.Where("id = ? AND item_id = ?", request.StockID, item.ID).Delete(stock).Error; err != nil {
 		s.log.Errorf("failed to delete stock item by id: %v", err)
+		return false, exception.InternalServerError
+	}
+
+	if err := s.itemRepository.Save(tx, item); err != nil {
+		s.log.Errorf("failed to save stock item: %v", err)
 		return false, exception.InternalServerError
 	}
 

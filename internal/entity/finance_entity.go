@@ -1,14 +1,19 @@
 package entity
 
-// import "time"
+import (
+	"gorm.io/gorm"
+)
 
-// type Finance struct {
-// 	ID uint `gorm:"column:id;type:serial;primaryKey;autoIncrement"`
+type Finance struct {
+	gorm.Model
+	Category    string `gorm:"size:30;not null"`
+	Description string `gorm:"size:100;not null"`
+	Amount      int    `gorm:"not null"`
+	ExtraNote   string `gorm:"type:text"`
+	ProofImage  string `gorm:"size:100;not null"`
+	ModifiedBy  string `gorm:"size:100;not null"`
+}
 
-// 	CreatedAt time.Time
-// 	UpdatedAt time.Time
-// }
-
-// func (f *Finance) TableName() string {
-// 	return "finances"
-// }
+func (f *Finance) TableName() string {
+	return "finances"
+}

@@ -68,6 +68,7 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 
 	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 	if ext != ".csv" {
+		h.log.Warnf("invalid uploaded file format")
 		return exception.InvalidCsvFormatError
 	}
 
@@ -254,10 +255,17 @@ func (h *ItemHandler) Delete(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) DeleteStock(c *fiber.Ctx) error {
-	request := new(model.DeleteStockRequest)
-	if err := c.ParamsParser(request); err != nil {
-		h.log.Warnf("failed to parse request body: %v", err)
-		return err
+	id := c.Params("id")
+	stockIdStr := c.Params("stock_id")
+
+	stockIdInt, err := strconv.Atoi(stockIdStr)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "stock_id must be a number")
+	}
+
+	request := &model.DeleteStockRequest{
+		ID:      id,
+		StockID: stockIdInt,
 	}
 
 	response, err := h.itemService.DeleteStock(c.Context(), request)

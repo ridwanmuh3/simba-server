@@ -10,9 +10,10 @@ import (
 )
 
 type RouteConfig struct {
-	App         *fiber.App
-	UserHandler *handler.UserHandler
-	ItemHandler *handler.ItemHandler
+	App            *fiber.App
+	UserHandler    *handler.UserHandler
+	ItemHandler    *handler.ItemHandler
+	FinanceHandler *handler.FinanceHandler
 	// StorageHandler *handler.StorageHandler
 	AuthMiddleware fiber.Handler
 	Log            *zap.SugaredLogger
@@ -23,6 +24,7 @@ func (c *RouteConfig) Setup() {
 	c.SetupAuthRoute()
 	c.SetupUserRoute()
 	c.SetupItemRoute()
+	c.SetupFinanceRoute()
 	// c.SetupStorageRoute()
 }
 
@@ -32,6 +34,10 @@ func (c *RouteConfig) SetupPublicRoute() {
 			Status:  fiber.StatusOK,
 			Message: "Welcome to SIMBA API!",
 		})
+	})
+
+	c.App.Get("/health", func(c *fiber.Ctx) error {
+		return c.SendString("API OK!")
 	})
 }
 
@@ -76,4 +82,17 @@ func (c *RouteConfig) SetupItemRoute() {
 	itemRoute.Get("/stocks", c.ItemHandler.FindAllStocks)
 	itemRoute.Get("/:id", c.ItemHandler.FindById)
 	itemRoute.Get("/", c.ItemHandler.FindAll)
+}
+
+func (c *RouteConfig) SetupFinanceRoute() {
+	financeRoute := c.App.Group("/api/finances")
+
+	financeRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"))
+
+	financeRoute.Post("/", c.FinanceHandler.Add)
+	// financeRoute.Post("/import", c.FinanceHandler.ImportItems)
+	financeRoute.Put("/:id", c.FinanceHandler.Update)
+	financeRoute.Delete("/:id", c.FinanceHandler.Delete)
+	financeRoute.Get("/:id", c.FinanceHandler.FindById)
+	financeRoute.Get("/", c.FinanceHandler.FindAll)
 }

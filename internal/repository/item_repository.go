@@ -112,7 +112,7 @@ func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx 
 			)
 		}
 
-		if slices.Contains([]string{"IN", "OUT", "ALL"}, query.Type) {
+		if slices.Contains([]string{"IN", "OUT"}, query.Type) {
 			tx = tx.Where("stock_tracking.type = ?", query.Type)
 		}
 
