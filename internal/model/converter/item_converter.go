@@ -7,13 +7,14 @@ import (
 
 func ItemToResponse(item *entity.Item) *model.ItemResponse {
 	return &model.ItemResponse{
-		ID:          item.ID,
-		Name:        item.Name,
-		Category:    item.Category,
-		Stock:       item.Stock,
-		MeasureUnit: item.MeasureUnit,
-		UnitPrice:   item.UnitPrice,
-		TotalPrice:  item.TotalPrice,
+		ID:           item.ID,
+		Name:         item.Name,
+		Category:     item.Category,
+		Stock:        item.Stock,
+		InitialStock: item.InitialStock,
+		MeasureUnit:  item.MeasureUnit,
+		UnitPrice:    item.UnitPrice,
+		TotalPrice:   item.TotalPrice,
 	}
 }
 

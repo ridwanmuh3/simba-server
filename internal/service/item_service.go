@@ -70,14 +70,15 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 	newID := fmt.Sprintf("MBG-BHN-%04d", currentNumber)
 
 	item := &entity.Item{
-		ID:          newID,
-		Name:        request.Name,
-		Category:    request.Category,
-		Stock:       request.Stock,
-		UnitPrice:   request.UnitPrice,
-		MeasureUnit: request.MeasureUnit,
-		TotalPrice:  request.UnitPrice * float64(request.Stock),
-		ModifiedBy:  request.ModifiedBy,
+		ID:           newID,
+		Name:         request.Name,
+		Category:     request.Category,
+		InitialStock: request.Stock,
+		Stock:        request.Stock,
+		UnitPrice:    request.UnitPrice,
+		MeasureUnit:  request.MeasureUnit,
+		TotalPrice:   request.UnitPrice * float64(request.Stock),
+		ModifiedBy:   request.ModifiedBy,
 	}
 
 	if err := s.itemRepository.Save(tx, item); err != nil {
@@ -126,14 +127,15 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 		newID := fmt.Sprintf("MBG-BHN-%04d", currentNumber)
 
 		item := entity.Item{
-			ID:          newID,
-			Name:        reqItem.Name,
-			Category:    reqItem.Category,
-			Stock:       reqItem.Stock,
-			MeasureUnit: reqItem.MeasureUnit,
-			UnitPrice:   reqItem.UnitPrice,
-			TotalPrice:  reqItem.UnitPrice * float64(reqItem.Stock),
-			ModifiedBy:  reqItem.ModifiedBy,
+			ID:           newID,
+			Name:         reqItem.Name,
+			Category:     reqItem.Category,
+			Stock:        reqItem.Stock,
+			InitialStock: reqItem.Stock,
+			MeasureUnit:  reqItem.MeasureUnit,
+			UnitPrice:    reqItem.UnitPrice,
+			TotalPrice:   reqItem.UnitPrice * float64(reqItem.Stock),
+			ModifiedBy:   reqItem.ModifiedBy,
 		}
 		items = append(items, item)
 	}

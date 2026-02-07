@@ -3,13 +3,14 @@ package model
 import "time"
 
 type ItemResponse struct {
-	ID          string  `json:"id,omitempty"`
-	Name        string  `json:"name,omitempty"`
-	Category    string  `json:"category,omitempty"`
-	Stock       int     `json:"stock,omitempty"`
-	MeasureUnit string  `json:"measure_unit,omitempty"`
-	UnitPrice   float64 `json:"unit_price,omitempty"`
-	TotalPrice  float64 `json:"total_price,omitempty"`
+	ID           string  `json:"id,omitempty"`
+	Name         string  `json:"name,omitempty"`
+	Category     string  `json:"category,omitempty"`
+	Stock        int     `json:"stock,omitempty"`
+	InitialStock int     `json:"initial_stock,omitempty"`
+	MeasureUnit  string  `json:"measure_unit,omitempty"`
+	UnitPrice    float64 `json:"unit_price,omitempty"`
+	TotalPrice   float64 `json:"total_price,omitempty"`
 }
 
 type StockResponse struct {
