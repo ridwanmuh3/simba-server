@@ -1,6 +1,8 @@
 package route
 
 import (
+	"os"
+
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 
@@ -10,10 +12,11 @@ import (
 )
 
 type RouteConfig struct {
-	App            *fiber.App
-	UserHandler    *handler.UserHandler
-	ItemHandler    *handler.ItemHandler
-	FinanceHandler *handler.FinanceHandler
+	App              *fiber.App
+	UserHandler      *handler.UserHandler
+	ItemHandler      *handler.ItemHandler
+	FinanceHandler   *handler.FinanceHandler
+	DashboardHandler *handler.DashboardHandler
 	// StorageHandler *handler.StorageHandler
 	AuthMiddleware fiber.Handler
 	Log            *zap.SugaredLogger
@@ -25,6 +28,7 @@ func (c *RouteConfig) Setup() {
 	c.SetupUserRoute()
 	c.SetupItemRoute()
 	c.SetupFinanceRoute()
+	c.SetupDashboardRoute()
 	// c.SetupStorageRoute()
 }
 
@@ -95,4 +99,23 @@ func (c *RouteConfig) SetupFinanceRoute() {
 	financeRoute.Delete("/:id", c.FinanceHandler.Delete)
 	financeRoute.Get("/:id", c.FinanceHandler.FindById)
 	financeRoute.Get("/", c.FinanceHandler.FindAll)
+}
+
+func (c *RouteConfig) SetupDashboardRoute() {
+	dashboardRoute := c.App.Group("/api/dashboard")
+	dashboardRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"))
+	dashboardRoute.Get("/", c.DashboardHandler.GetDashboardStats)
+}
+
+func (c *RouteConfig) SetupUploadRoute() {
+	uploads := c.App.Group("/uploads")
+	uploads.Get("/*", func(c *fiber.Ctx) error {
+		filePath := "./uploads" + c.Params("*")
+
+		if _, err := os.Stat(filePath); err != nil {
+			return fiber.ErrNotFound
+		}
+
+		return c.SendFile(filePath)
+	})
 }

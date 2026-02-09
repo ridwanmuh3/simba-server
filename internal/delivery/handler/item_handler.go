@@ -220,6 +220,7 @@ func (h *ItemHandler) UpdateStock(c *fiber.Ctx) error {
 	}
 
 	request.ModifiedBy = auth.Fullname
+	h.log.Info(request)
 
 	response, err := h.itemService.UpdateStock(c.Context(), request)
 	if err != nil {

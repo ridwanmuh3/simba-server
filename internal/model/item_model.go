@@ -19,6 +19,8 @@ type StockResponse struct {
 	Amount        int          `json:"amount,omitempty"`
 	PreviousStock int          `json:"previous_stock,omitempty"`
 	NewStock      int          `json:"new_stock,omitempty"`
+	UnitPrice     float64      `json:"unit_price,omitempty"`
+	TotalPrice    float64      `json:"total_price,omitempty"`
 	Supplier      string       `json:"supplier,omitempty"`
 	ModifiedBy    string       `json:"modified_by,omitempty"`
 	CreatedAt     time.Time    `json:"created_at,omitzero"`
@@ -43,16 +45,17 @@ type UpdateItemRequest struct {
 	Name        string  `json:"name,omitempty" validate:"omitempty,printascii,min=3,max=90"`
 	Category    string  `json:"category,omitempty" validate:"omitempty,alphaspace,min=3,max=30"`
 	MeasureUnit string  `json:"measure_unit,omitempty" validate:"omitempty,printascii,min=1,max=30"`
-	UnitPrice   float64 `json:"unit_price,omitempty" validate:"omitempty,numeric,gt=0"`
+	UnitPrice   float64 `json:"unit_price,omitempty" validate:"omitempty,number,gt=0"`
 	ModifiedBy  string  `json:"-" validate:"required,alphaspace,min=2,max=50"`
 }
 
 type UpdateItemStockRequest struct {
-	ID         string `param:"id,omitempty" validate:"omitempty,printascii,max=30"`
-	Type       string `json:"type" validate:"required,alpha,min=2,max=10"`
-	Amount     int    `json:"amount" validate:"required,numeric,min=0"`
-	Supplier   string `json:"supplier" validate:"omitempty,alphaspace,max=100"`
-	ModifiedBy string `json:"-" validate:"required,alphaspace,min=2,max=50"`
+	ID         string  `param:"id,omitempty" validate:"omitempty,printascii,max=30"`
+	Type       string  `json:"type" validate:"required,alpha,min=2,max=10"`
+	Amount     int     `json:"amount" validate:"required,numeric,min=0"`
+	UnitPrice  float64 `json:"unit_price" validate:"required,numeric,gt=1"`
+	Supplier   string  `json:"supplier" validate:"omitempty,alphaspace,max=100"`
+	ModifiedBy string  `json:"-" validate:"required,alphaspace,min=2,max=50"`
 }
 
 type DeleteItemRequest struct {
@@ -61,7 +64,7 @@ type DeleteItemRequest struct {
 
 type DeleteStockRequest struct {
 	ID      string `param:"id" validate:"required,printascii"`
-	StockID int    `param:"stock_id" validate:"required,number"`
+	StockID int    `param:"stock_id" validate:"required,numeric"`
 }
 
 type FindByIdItemRequest struct {

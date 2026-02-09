@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -35,11 +36,23 @@ func NewFinanceHandler(config *viper.Viper, logger *zap.SugaredLogger, financeSe
 func (h *FinanceHandler) Add(c *fiber.Ctx) error {
 	auth := middleware.GetAuthUser(c)
 
-	request := new(model.AddFinanceRequest)
-	if err := c.BodyParser(request); err != nil {
-		h.log.Warnf("failed to parse request body: %v", err)
-		return err
+	typeFinance := c.FormValue("type")
+	category := c.FormValue("category")
+	description := c.FormValue("description")
+	strAmount := c.FormValue("amount")
+	amount, err := strconv.Atoi(strAmount)
+	if err != nil {
+		h.log.Warnf("failed to convert amount: %v", err)
+		return exception.InternalServerError
 	}
+	extraNote := c.FormValue("extra_note")
+
+	request := new(model.AddFinanceRequest)
+	request.Type = typeFinance
+	request.Category = category
+	request.Description = description
+	request.Amount = amount
+	request.ExtraNote = extraNote
 
 	// 1. Ambil file
 	proofImg, err := c.FormFile("proof_image")
@@ -57,7 +70,7 @@ func (h *FinanceHandler) Add(c *fiber.Ctx) error {
 		return exception.InvalidFileFormatError
 	}
 
-	const maxFileSize = int64(5 * 1024 * 1024)
+	const maxFileSize = int64(10 * 1024 * 1024)
 	if proofImg.Size > maxFileSize {
 		h.log.Warnf("file size exceeded: %d bytes", proofImg.Size)
 		return exception.ExceedMaximumFileSizeError
@@ -65,16 +78,17 @@ func (h *FinanceHandler) Add(c *fiber.Ctx) error {
 
 	fileName := uuid.New().String() + ext
 
-	uploadDir := "./uploads/finances-proof"
+	uploadDir := filepath.Join("uploads", "finances-proof")
+
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		h.log.Errorf("failed to create upload directory: %v", err)
+		h.log.Warnf("failed to create upload directory: %v", err)
 		return exception.InternalServerError
 	}
 
 	filePath := filepath.Join(uploadDir, fileName)
 
 	if err := c.SaveFile(proofImg, filePath); err != nil {
-		h.log.Errorf("failed to save uploaded file: %v", err)
+		h.log.Warnf("failed to save uploaded file: %v", err)
 		return exception.InternalServerError
 	}
 
@@ -84,7 +98,7 @@ func (h *FinanceHandler) Add(c *fiber.Ctx) error {
 	response, err := h.financeService.Add(c.Context(), request)
 	if err != nil {
 		h.log.Warnf("failed to add finance data: %v", err)
-		return err
+		return exception.InternalServerError
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(model.Response[*model.FinanceResponse]{
@@ -93,6 +107,7 @@ func (h *FinanceHandler) Add(c *fiber.Ctx) error {
 		Data:    response,
 	})
 }
+
 func (h *FinanceHandler) Update(c *fiber.Ctx) error {
 	auth := middleware.GetAuthUser(c)
 
@@ -127,24 +142,24 @@ func (h *FinanceHandler) Update(c *fiber.Ctx) error {
 			return exception.InvalidFileFormatError
 		}
 
-		const maxFileSize = int64(5 * 1024 * 1024)
+		const maxFileSize = int64(10 * 1024 * 1024)
 		if proofImg.Size > maxFileSize {
 			h.log.Warnf("file size exceeded: %d bytes", proofImg.Size)
 			return exception.ExceedMaximumFileSizeError
 		}
 
 		fileName := uuid.New().String() + ext
-		uploadDir := "./uploads/finances-proof"
+		uploadDir := filepath.Join("uploads", "finances-proof")
 
 		if err := os.MkdirAll(uploadDir, 0755); err != nil {
-			h.log.Errorf("failed to create upload directory: %v", err)
+			h.log.Warnf("failed to create upload directory: %v", err)
 			return exception.InternalServerError
 		}
 
 		newFilePath := filepath.Join(uploadDir, fileName)
 
 		if err := c.SaveFile(proofImg, newFilePath); err != nil {
-			h.log.Errorf("failed to save uploaded file: %v", err)
+			h.log.Warnf("failed to save uploaded file: %v", err)
 			return exception.InternalServerError
 		}
 

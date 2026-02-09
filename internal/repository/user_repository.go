@@ -2,6 +2,7 @@ package repository
 
 import (
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/model"
@@ -31,7 +32,13 @@ func (r *UserRepository) FindByUsername(db *gorm.DB, user *entity.User, username
 
 func (r *UserRepository) FindAll(db *gorm.DB, query *model.FindAllUserRequest) ([]entity.User, int64, error) {
 	var users []entity.User
-	if err := db.Scopes(r.FilterUser(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order("last_active DESC").Find(&users).Error; err != nil {
+
+	orderBy := clause.OrderBy{Columns: []clause.OrderByColumn{
+		{Column: clause.Column{Name: "created_at"}, Desc: true},
+		{Column: clause.Column{Name: "active"}, Desc: true},
+	}}
+
+	if err := db.Scopes(r.FilterUser(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order(orderBy).Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
 

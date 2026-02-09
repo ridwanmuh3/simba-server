@@ -28,12 +28,12 @@ func (r *ItemRepository) AddBatches(db *gorm.DB, items []entity.Item) error {
 
 func (r *ItemRepository) FindAll(db *gorm.DB, query *model.FindAllItemsRequest) ([]entity.Item, int64, error) {
 	var items []entity.Item
-	if err := db.Scopes(r.FilterItem(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order("id ASC").Find(&items).Error; err != nil {
+	if err := db.Scopes(r.FilterItem(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order("created_at DESC").Find(&items).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var total int64
-	if err := db.Model(&entity.Item{}).Scopes(r.FilterItem(query)).Count(&total).Error; err != nil {
+	if err := db.Model(new(entity.Item)).Scopes(r.FilterItem(query)).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -47,7 +47,7 @@ func (r *ItemRepository) FindAllStocks(db *gorm.DB, query *model.FindAllStocksRe
 	}
 
 	var total int64
-	if err := db.Model(&entity.StockTracking{}).Scopes(r.FilterStock(query)).Count(&total).Error; err != nil {
+	if err := db.Model(new(entity.StockTracking)).Scopes(r.FilterStock(query)).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -100,20 +100,20 @@ func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *g
 
 func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx *gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
-		tx = tx.Joins("LEFT JOIN items AS item ON item.id = stock_tracking.item_id")
+		tx = tx.Joins("LEFT JOIN items AS item ON item.id = stock_tracks.item_id")
 
 		if searchQuery := query.SearchQuery; searchQuery != "" && len(searchQuery) > 0 {
 			searchPattern := "%" + searchQuery + "%"
 			tx = tx.Where(
-				tx.Where("stock_tracking.item_id ILIKE ?", searchPattern).
+				tx.Where("stock_tracks.item_id ILIKE ?", searchPattern).
 					Or("item.name ILIKE ?", searchPattern).
 					Or("item.category ILIKE ?", searchPattern).
-					Or("stock_tracking.supplier ILIKE ?", searchPattern),
+					Or("stock_tracks.supplier ILIKE ?", searchPattern),
 			)
 		}
 
 		if slices.Contains([]string{"IN", "OUT"}, query.Type) {
-			tx = tx.Where("stock_tracking.type = ?", query.Type)
+			tx = tx.Where("stock_tracks.type = ?", query.Type)
 		}
 
 		const layout = "2006-01-02"
@@ -124,7 +124,7 @@ func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx 
 					parsedStart.Year(), parsedStart.Month(), parsedStart.Day(),
 					0, 0, 0, 0, time.Local,
 				)
-				tx = tx.Where("stock_tracking.created_at >= ?", startOfDay)
+				tx = tx.Where("stock_tracks.created_at >= ?", startOfDay)
 			}
 		}
 
@@ -134,7 +134,7 @@ func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx 
 					parsedEnd.Year(), parsedEnd.Month(), parsedEnd.Day(),
 					23, 59, 59, 999999999, time.Local,
 				)
-				tx = tx.Where("stock_trackings.created_at <= ?", endOfDay)
+				tx = tx.Where("stock_trackss.created_at <= ?", endOfDay)
 			}
 		}
 

@@ -83,12 +83,21 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 
 	if err := s.itemRepository.Save(tx, item); err != nil {
 		s.log.Errorf("failed to save item to database: %v", err)
-		return nil, err
+		return nil, exception.InternalServerError
+	}
+
+	if err := tx.Create(&entity.ActivityLog{
+		Type:        "ADD-ITEM",
+		Title:       "Bahan baru ditambahkan",
+		Description: fmt.Sprintf("%s - %d %s", item.Name, item.InitialStock, item.MeasureUnit),
+	}).Error; err != nil {
+		s.log.Errorf("failed to save activity log to database: %v", err)
+		return nil, exception.InternalServerError
 	}
 
 	if err := tx.Commit().Error; err != nil {
 		s.log.Errorf("failed to commit database transaction: %v", err)
-		return nil, err
+		return nil, exception.InternalServerError
 	}
 
 	return converter.ItemToResponse(item), nil
@@ -143,8 +152,17 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 	if len(items) > 0 {
 		if err := s.itemRepository.AddBatches(tx, items); err != nil {
 			s.log.Errorf("failed to bulk insert items: %v", err)
-			return err
+			return exception.InternalServerError
 		}
+	}
+
+	if err := tx.Create(&entity.ActivityLog{
+		Type:        "ADD-ITEM-BATCHES",
+		Title:       "Import bahan baru ditambahkan",
+		Description: "Format CSV",
+	}).Error; err != nil {
+		s.log.Errorf("failed to save activity log to database: %v", err)
+		return exception.InternalServerError
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -215,6 +233,7 @@ func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItem
 	stockTracking.ModifiedBy = request.ModifiedBy
 	stockTracking.PreviousStock = item.Stock
 	stockTracking.Amount = request.Amount
+	stockTracking.UnitPrice = request.UnitPrice
 	stockTracking.Supplier = request.Supplier
 
 	switch request.Type {
@@ -231,7 +250,9 @@ func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItem
 		return nil, fiber.NewError(fiber.StatusBadRequest, "invalid update stock type")
 	}
 
+	stockTracking.TotalPrice = request.UnitPrice * float64(request.Amount)
 	item.Stock = stockTracking.NewStock
+	item.TotalPrice = request.UnitPrice * float64(item.Stock)
 
 	if err := s.itemRepository.Save(tx, item); err != nil {
 		s.log.Errorf("failed to update item stock to database: %v", err)
@@ -240,6 +261,15 @@ func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItem
 
 	if err := tx.Save(stockTracking).Error; err != nil {
 		s.log.Errorf("failed to create stock tracking to database: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	if err := tx.Create(&entity.ActivityLog{
+		Type:        "UPDATE-STOCK",
+		Title:       "Stok bahan diperbarui",
+		Description: fmt.Sprintf("%s - %d %s", item.Name, item.Stock, item.MeasureUnit),
+	}).Error; err != nil {
+		s.log.Errorf("failed to save activity log to database: %v", err)
 		return nil, exception.InternalServerError
 	}
 
@@ -268,6 +298,15 @@ func (s *ItemService) Delete(ctx context.Context, request *model.DeleteItemReque
 
 	if err := s.itemRepository.Delete(tx, item); err != nil {
 		s.log.Errorf("failed to delete item by id: %v", err)
+		return false, exception.InternalServerError
+	}
+
+	if err := tx.Create(&entity.ActivityLog{
+		Type:        "DELETE-ITEM",
+		Title:       "Data bahan dihapus",
+		Description: fmt.Sprintf("%s", item.Name),
+	}).Error; err != nil {
+		s.log.Errorf("failed to save activity log to database: %v", err)
 		return false, exception.InternalServerError
 	}
 
@@ -319,6 +358,15 @@ func (s *ItemService) DeleteStock(ctx context.Context, request *model.DeleteStoc
 
 	if err := s.itemRepository.Save(tx, item); err != nil {
 		s.log.Errorf("failed to save stock item: %v", err)
+		return false, exception.InternalServerError
+	}
+
+	if err := tx.Create(&entity.ActivityLog{
+		Type:        "REDUCE-STOCK",
+		Title:       "Data stock bahan diperbarui",
+		Description: fmt.Sprintf("%s - %d %s", item.Name, item.Stock, item.MeasureUnit),
+	}).Error; err != nil {
+		s.log.Errorf("failed to save activity log to database: %v", err)
 		return false, exception.InternalServerError
 	}
 

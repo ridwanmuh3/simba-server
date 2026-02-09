@@ -1,6 +1,8 @@
 package config
 
 import (
+	"time"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/contrib/fiberzap/v2"
 	"github.com/gofiber/fiber/v2"
@@ -33,26 +35,34 @@ func Bootstrap(config *BootstrapConfig) {
 	// services
 	userService := service.NewUserService(config.DB, config.Log, config.Validate, userRepository)
 	itemService := service.NewItemService(config.DB, config.Log, config.Validate, itemRepository)
-	// storageService := service.NewStorageService(config.Log, config.Validate)
+	financeService := service.NewFinanceService(config.DB, config.Log, config.Validate)
+	dashboardService := service.NewDashboardService(config.DB, config.Log, config.Validate)
 
 	// handler
 	userHandler := handler.NewUserHandler(config.Config, config.Log, userService)
 	itemHandler := handler.NewItemHandler(config.Config, config.Log, itemService)
-	// storageHandler := handler.NewStorageHandler(config.Config, config.Log, storageService)
+	financeHandler := handler.NewFinanceHandler(config.Config, config.Log, financeService)
+	dashboardHandler := handler.NewDashboardHandler(config.Config, config.Log, dashboardService)
 
 	authMiddleware := middleware.NewAuthMiddleware(config.Log, userService)
 
 	routeConfig := &route.RouteConfig{
-		App:         config.App,
-		UserHandler: userHandler,
-		ItemHandler: itemHandler,
-		// StorageHandler: storageHandler,
-		AuthMiddleware: authMiddleware,
-		Log:            config.Log,
+		App:              config.App,
+		UserHandler:      userHandler,
+		ItemHandler:      itemHandler,
+		FinanceHandler:   financeHandler,
+		DashboardHandler: dashboardHandler,
+		AuthMiddleware:   authMiddleware,
+		Log:              config.Log,
 	}
 
 	SetupGlobalMiddlewares(config)
 	routeConfig.Setup()
+
+	config.App.Static("/uploads", "./uploads", fiber.Static{
+		Browse:        false,
+		CacheDuration: 24 * time.Hour,
+	})
 }
 
 func SetupGlobalMiddlewares(config *BootstrapConfig) {
@@ -60,7 +70,7 @@ func SetupGlobalMiddlewares(config *BootstrapConfig) {
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowCredentials: true,
 		AllowMethods:     "GET, POST, HEAD, PUT, DELETE, PATCH",
-		AllowOrigins:     "http://localhost:9091",
+		AllowOrigins:     "http://localhost:5173",
 	}))
 
 	config.App.Use(recover.New())

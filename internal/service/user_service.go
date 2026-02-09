@@ -145,10 +145,10 @@ func (s *UserService) Delete(ctx context.Context, request *model.DeleteUserReque
 		}
 	}
 
-	if user.IsActive {
-		s.log.Errorf("failed to delete currently active user")
-		return false, exception.UserDeleteActiveUserError
-	}
+	// if user.IsActive {
+	// 	s.log.Errorf("failed to delete currently active user")
+	// 	return false, exception.UserDeleteActiveUserError
+	// }
 
 	if err := s.userRepository.Delete(tx, user); err != nil {
 		s.log.Errorf("failed to delete user by id: %v", err)

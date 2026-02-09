@@ -26,6 +26,8 @@ func StockToResponse(stockTracking *entity.StockTracking) *model.StockResponse {
 		PreviousStock: stockTracking.PreviousStock,
 		NewStock:      stockTracking.NewStock,
 		Supplier:      stockTracking.Supplier,
+		UnitPrice:     stockTracking.UnitPrice,
+		TotalPrice:    stockTracking.TotalPrice,
 		ModifiedBy:    stockTracking.ModifiedBy,
 		CreatedAt:     stockTracking.CreatedAt,
 		Item:          *ItemToResponse(&stockTracking.Item),

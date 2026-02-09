@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -12,18 +13,16 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/exception"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/model/converter"
-	"github.com/ridwanmuh3/simba-server/internal/repository"
 )
 
 type FinanceService struct {
-	db             *gorm.DB
-	log            *zap.SugaredLogger
-	validate       *validator.Validate
-	itemRepository *repository.ItemRepository
+	db       *gorm.DB
+	log      *zap.SugaredLogger
+	validate *validator.Validate
 }
 
-func NewFinanceService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate) *ItemService {
-	return &ItemService{
+func NewFinanceService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate) *FinanceService {
+	return &FinanceService{
 		db:       db,
 		log:      logger,
 		validate: validate,
@@ -48,6 +47,15 @@ func (s *FinanceService) Add(ctx context.Context, request *model.AddFinanceReque
 
 	if err := tx.Save(finance).Error; err != nil {
 		s.log.Errorf("failed to save finance data: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	if err := tx.Create(&entity.ActivityLog{
+		Type:        "ADD-FINANCE",
+		Title:       "Data keuangan ditambahkan",
+		Description: fmt.Sprintf("%s - %s", finance.Category, finance.Description),
+	}).Error; err != nil {
+		s.log.Errorf("failed to save activity log to database: %v", err)
 		return nil, exception.InternalServerError
 	}
 
@@ -111,6 +119,15 @@ func (s *FinanceService) Delete(ctx context.Context, request *model.DeleteFinanc
 
 	if err := tx.Delete(finance).Error; err != nil {
 		s.log.Errorf("failed to delete finance data: %v", err)
+		return false, exception.InternalServerError
+	}
+
+	if err := tx.Create(&entity.ActivityLog{
+		Type:        "DELETE-FINANCE",
+		Title:       "Data keuangan dihapus",
+		Description: fmt.Sprintf("%s - %s", finance.Category, finance.Description),
+	}).Error; err != nil {
+		s.log.Errorf("failed to save activity log to database: %v", err)
 		return false, exception.InternalServerError
 	}
 
@@ -186,7 +203,8 @@ func (s *FinanceService) FilterFinance(query *model.FindAllFinanceRequest) func(
 			tx = tx.Where(
 				tx.Where("category ILIKE ?", searchPattern).
 					Or("description ILIKE ?", searchPattern).
-					Or("extra_note ILIKE ?", searchPattern),
+					Or("extra_note ILIKE ?", searchPattern).
+					Or("type ILIKE ?"),
 			)
 		}
 
