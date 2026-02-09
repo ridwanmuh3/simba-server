@@ -33,3 +33,6 @@ go.work.sum
 # .vscode/
 # migrations/
 logs/
+tmp/
+uploads/
+cmd/seeder/*
