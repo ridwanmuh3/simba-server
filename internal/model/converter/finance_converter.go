@@ -8,6 +8,7 @@ import (
 func FinanceToResponse(finance *entity.Finance) *model.FinanceResponse {
 	return &model.FinanceResponse{
 		ID:          int(finance.ID),
+		Type:        finance.Type,
 		Category:    finance.Category,
 		Description: finance.Description,
 		Amount:      finance.Amount,

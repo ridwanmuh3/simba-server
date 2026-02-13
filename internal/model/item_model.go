@@ -27,6 +27,14 @@ type StockResponse struct {
 	Item          ItemResponse `json:"item,omitzero"`
 }
 
+type StocksSummaryResponse struct {
+	MasterItemsTotalBudget float64 `json:"master_items_total_budget,omitempty"`
+	BudgetIn               float64 `json:"budget_in,omitempty"`
+	BudgetOut              float64 `json:"budget_out,omitempty"`
+	Profit                 float64 `json:"profit,omitempty"`
+	CurrentBudget          float64 `json:"current_budget,omitempty"`
+}
+
 type AddItemRequest struct {
 	Name        string  `json:"name" validate:"required,printascii,min=3,max=90"`
 	Category    string  `json:"category" validate:"required,alphaspace,min=3,max=30"`

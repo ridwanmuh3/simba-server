@@ -7,7 +7,7 @@ type DashboardStatsResponse struct {
 	StockIn    int64 `json:"stock_in"`
 	StockOut   int64 `json:"stock_out"`
 
-	TotalBudget int64 `json:"total_budged"`
+	TotalBudget int64 `json:"total_budget"`
 	BudgetIn    int64 `json:"budget_in"`
 	BudgetOut   int64 `json:"budget_out"`
 

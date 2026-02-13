@@ -73,23 +73,25 @@ func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *g
 			tx = tx.Where("id ILIKE ? OR name ILIKE ? OR category ILIKE ?", searchQuery, searchQuery, searchQuery)
 		}
 
-		const layout = "2006-01-02"
-
 		if query.StartDate != "" {
-			parsedStart, err := time.Parse(layout, query.StartDate)
+			parsedStart, err := time.Parse(time.RFC3339, query.StartDate)
 			if err == nil {
-				tx = tx.Where("created_at >= ?", parsedStart)
+				startOfDay := parsedStart.
+					In(time.Local).
+					Truncate(24 * time.Hour)
+
+				tx = tx.Where("created_at >= ?", startOfDay)
 			}
 		}
 
 		if query.EndDate != "" {
-			parsedEnd, err := time.Parse(layout, query.EndDate)
+			parsedEnd, err := time.Parse(time.RFC3339, query.EndDate)
 			if err == nil {
-				endOfDay := time.Date(
-					parsedEnd.Year(), parsedEnd.Month(), parsedEnd.Day(),
-					23, 59, 59, 999999999,
-					parsedEnd.Location(),
-				)
+				endOfDay := parsedEnd.
+					In(time.Local).
+					Truncate(24 * time.Hour).
+					Add(24*time.Hour - time.Nanosecond)
+
 				tx = tx.Where("created_at <= ?", endOfDay)
 			}
 		}
@@ -116,25 +118,26 @@ func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx 
 			tx = tx.Where("stock_tracks.type = ?", query.Type)
 		}
 
-		const layout = "2006-01-02"
+		if query.StartDate != "" {
+			parsedStart, err := time.Parse(time.RFC3339, query.StartDate)
+			if err == nil {
+				startOfDay := parsedStart.
+					In(time.Local).
+					Truncate(24 * time.Hour)
 
-		if query.StartDate != "" && len(query.StartDate) > 0 {
-			if parsedStart, err := time.Parse(layout, query.StartDate); err == nil {
-				startOfDay := time.Date(
-					parsedStart.Year(), parsedStart.Month(), parsedStart.Day(),
-					0, 0, 0, 0, time.Local,
-				)
 				tx = tx.Where("stock_tracks.created_at >= ?", startOfDay)
 			}
 		}
 
-		if query.EndDate != "" && len(query.EndDate) > 0 {
-			if parsedEnd, err := time.Parse(layout, query.EndDate); err == nil {
-				endOfDay := time.Date(
-					parsedEnd.Year(), parsedEnd.Month(), parsedEnd.Day(),
-					23, 59, 59, 999999999, time.Local,
-				)
-				tx = tx.Where("stock_trackss.created_at <= ?", endOfDay)
+		if query.EndDate != "" {
+			parsedEnd, err := time.Parse(time.RFC3339, query.EndDate)
+			if err == nil {
+				endOfDay := parsedEnd.
+					In(time.Local).
+					Truncate(24 * time.Hour).
+					Add(24*time.Hour - time.Nanosecond)
+
+				tx = tx.Where("stock_tracks.created_at <= ?", endOfDay)
 			}
 		}
 

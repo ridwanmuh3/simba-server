@@ -84,6 +84,7 @@ func (c *RouteConfig) SetupItemRoute() {
 	itemRoute.Delete("/:id", c.ItemHandler.Delete)
 	itemRoute.Get("/export", c.ItemHandler.ExportItems)
 	itemRoute.Get("/stocks", c.ItemHandler.FindAllStocks)
+	itemRoute.Get("/stocks/summary", c.ItemHandler.GetStocksFinanceSummary)
 	itemRoute.Get("/:id", c.ItemHandler.FindById)
 	itemRoute.Get("/", c.ItemHandler.FindAll)
 }
@@ -97,6 +98,7 @@ func (c *RouteConfig) SetupFinanceRoute() {
 	// financeRoute.Post("/import", c.FinanceHandler.ImportItems)
 	financeRoute.Put("/:id", c.FinanceHandler.Update)
 	financeRoute.Delete("/:id", c.FinanceHandler.Delete)
+	financeRoute.Get("/export", c.FinanceHandler.Export)
 	financeRoute.Get("/:id", c.FinanceHandler.FindById)
 	financeRoute.Get("/", c.FinanceHandler.FindAll)
 }

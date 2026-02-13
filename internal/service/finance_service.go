@@ -8,6 +8,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/exception"
@@ -39,6 +40,7 @@ func (s *FinanceService) Add(ctx context.Context, request *model.AddFinanceReque
 	}
 
 	finance := new(entity.Finance)
+	finance.Type = request.Type
 	finance.Category = request.Category
 	finance.Description = request.Description
 	finance.Amount = request.Amount
@@ -77,7 +79,7 @@ func (s *FinanceService) Update(ctx context.Context, request *model.UpdateFinanc
 	}
 
 	finance := new(entity.Finance)
-	if err := tx.Where("id = ?", request.ID).First(finance).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", request.ID).First(finance).Error; err != nil {
 		s.log.Errorf("failed to find finance by id: %v", err)
 		return nil, exception.FinanceNotFound
 	}
@@ -86,8 +88,11 @@ func (s *FinanceService) Update(ctx context.Context, request *model.UpdateFinanc
 	finance.Description = request.Description
 	finance.Amount = request.Amount
 	finance.ExtraNote = request.ExtraNote
-	finance.ProofImage = request.ProofImage
 	finance.ModifiedBy = request.ModifiedBy
+
+	if finance.ProofImage != request.ProofImage {
+		finance.ProofImage = request.ProofImage
+	}
 
 	if err := tx.Save(finance).Error; err != nil {
 		s.log.Errorf("failed to update finance data: %v", err)
@@ -162,14 +167,43 @@ func (s *FinanceService) FindById(ctx context.Context, request *model.FindByIdFi
 	return converter.FinanceToResponse(finance), nil
 }
 
-func (s *FinanceService) FindAll(ctx context.Context, request *model.FindAllFinanceRequest) ([]model.FinanceResponse, int64, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+func (s *FinanceService) FindAll(
+	ctx context.Context,
+	request *model.FindAllFinanceRequest,
+) ([]model.FinanceResponse, int64, error) {
+	db := s.db.WithContext(ctx)
 
 	if err := s.validate.Struct(request); err != nil {
-		s.log.Errorf("failed to validate request body: %v", err)
 		return nil, 0, err
 	}
+
+	var total int64
+	if err := db.Model(new(entity.Finance)).
+		Scopes(s.FilterFinance(request)).
+		Count(&total).Error; err != nil {
+		return nil, 0, exception.InternalServerError
+	}
+
+	var finances []entity.Finance
+	if err := db.Scopes(s.FilterFinance(request)).
+		Offset((request.Page - 1) * request.Size).
+		Limit(request.Size).
+		Order("created_at DESC").
+		Find(&finances).Error; err != nil {
+		return nil, 0, exception.InternalServerError
+	}
+
+	responses := make([]model.FinanceResponse, 0, len(finances))
+	for _, finance := range finances {
+		responses = append(responses,
+			*converter.FinanceToResponse(&finance))
+	}
+
+	return responses, total, nil
+}
+
+func (s *FinanceService) Export(ctx context.Context) ([]model.FinanceResponse, int64, error) {
+	tx := s.db.WithContext(ctx).Begin()
 
 	var total int64
 	if err := tx.Model(new(entity.Finance)).Count(&total).Error; err != nil {
@@ -178,7 +212,7 @@ func (s *FinanceService) FindAll(ctx context.Context, request *model.FindAllFina
 	}
 
 	var finances []entity.Finance
-	if err := tx.Scopes(s.FilterFinance(request)).Offset((request.Page - 1) * request.Size).Limit(request.Size).Order("created_at DESC").Find(&finances).Error; err != nil {
+	if err := tx.Find(&finances).Error; err != nil {
 		s.log.Errorf("failed to find all finances data: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
@@ -189,8 +223,8 @@ func (s *FinanceService) FindAll(ctx context.Context, request *model.FindAllFina
 	}
 
 	responses := make([]model.FinanceResponse, total)
-	for _, finance := range finances {
-		responses = append(responses, *converter.FinanceToResponse(&finance))
+	for i, finance := range finances {
+		responses[i] = *converter.FinanceToResponse(&finance)
 	}
 
 	return responses, total, nil
@@ -208,24 +242,25 @@ func (s *FinanceService) FilterFinance(query *model.FindAllFinanceRequest) func(
 			)
 		}
 
-		const layout = "2006-01-02"
+		if query.StartDate != "" {
+			parsedStart, err := time.Parse(time.RFC3339, query.StartDate)
+			if err == nil {
+				startOfDay := parsedStart.
+					In(time.Local).
+					Truncate(24 * time.Hour)
 
-		if query.StartDate != "" && len(query.StartDate) > 0 {
-			if parsedStart, err := time.Parse(layout, query.StartDate); err == nil {
-				startOfDay := time.Date(
-					parsedStart.Year(), parsedStart.Month(), parsedStart.Day(),
-					0, 0, 0, 0, time.Local,
-				)
 				tx = tx.Where("created_at >= ?", startOfDay)
 			}
 		}
 
-		if query.EndDate != "" && len(query.EndDate) > 0 {
-			if parsedEnd, err := time.Parse(layout, query.EndDate); err == nil {
-				endOfDay := time.Date(
-					parsedEnd.Year(), parsedEnd.Month(), parsedEnd.Day(),
-					23, 59, 59, 999999999, time.Local,
-				)
+		if query.EndDate != "" {
+			parsedEnd, err := time.Parse(time.RFC3339, query.EndDate)
+			if err == nil {
+				endOfDay := parsedEnd.
+					In(time.Local).
+					Truncate(24 * time.Hour).
+					Add(24*time.Hour - time.Nanosecond)
+
 				tx = tx.Where("created_at <= ?", endOfDay)
 			}
 		}

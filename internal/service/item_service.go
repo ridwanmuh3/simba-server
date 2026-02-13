@@ -10,6 +10,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/exception"
@@ -183,7 +184,8 @@ func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemReque
 	}
 
 	item := new(entity.Item)
-	if err := s.itemRepository.FindById(tx, item, request.ID); err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(item, "id = ?", request.ID).Error; err != nil {
 		s.log.Errorf("failed to find item by code: %v", err)
 		return nil, exception.ItemNotFoundError
 	}
@@ -195,7 +197,7 @@ func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemReque
 	item.TotalPrice = request.UnitPrice * float64(item.Stock)
 	item.ModifiedBy = request.ModifiedBy
 
-	if err := s.itemRepository.Save(tx, item); err != nil {
+	if err := s.itemRepository.Update(tx, item, item.ID); err != nil {
 		s.log.Errorf("failed to update item to database: %v", err)
 		return nil, exception.InternalServerError
 	}
@@ -218,7 +220,8 @@ func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItem
 	}
 
 	item := new(entity.Item)
-	if err := s.itemRepository.FindById(tx, item, request.ID); err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(item, "id = ?", request.ID).Error; err != nil {
 		s.log.Errorf("failed to find item by code: %v", err)
 		return nil, exception.ItemNotFoundError
 	}
@@ -252,14 +255,14 @@ func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItem
 
 	stockTracking.TotalPrice = request.UnitPrice * float64(request.Amount)
 	item.Stock = stockTracking.NewStock
-	item.TotalPrice = request.UnitPrice * float64(item.Stock)
+	item.TotalPrice = float64(item.Stock) * item.UnitPrice
 
-	if err := s.itemRepository.Save(tx, item); err != nil {
+	if err := s.itemRepository.Update(tx, item, item.ID); err != nil {
 		s.log.Errorf("failed to update item stock to database: %v", err)
 		return nil, exception.InternalServerError
 	}
 
-	if err := tx.Save(stockTracking).Error; err != nil {
+	if err := tx.Create(stockTracking).Error; err != nil {
 		s.log.Errorf("failed to create stock tracking to database: %v", err)
 		return nil, exception.InternalServerError
 	}
@@ -457,7 +460,7 @@ func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, in
 	defer tx.Rollback()
 
 	var items []entity.Item
-	err := tx.Model(new(entity.Item)).Order("id ASC").Find(&items).Error
+	err := tx.Model(new(entity.Item)).Order("created_at DESC").Find(&items).Error
 	if err != nil {
 		s.log.Errorf("failed to export all items: %v", err)
 		return nil, 0, exception.InternalServerError
@@ -474,4 +477,57 @@ func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, in
 	}
 
 	return responses, len(responses), nil
+}
+
+func (s *ItemService) GetStocksFinanceSummary(ctx context.Context) (*model.StocksSummaryResponse, error) {
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+
+	var (
+		masterItemsTotalBudget,
+		budgetIn,
+		budgetOut,
+		profit,
+		currentBudget float64
+	)
+
+	tx.
+		Model(new(entity.Item)).
+		Select("COALESCE(SUM(total_price),0)").
+		Scan(&masterItemsTotalBudget)
+
+	tx.
+		Model(new(entity.StockTracking)).
+		Select("COALESCE(SUM(amount * unit_price),0)").
+		Where("type = ?", "IN").
+		Scan(&budgetIn)
+
+	tx.
+		Model(new(entity.StockTracking)).
+		Select("COALESCE(SUM(amount * unit_price),0)").
+		Where("type = ?", "OUT").
+		Scan(&budgetOut)
+
+	profit = budgetOut - budgetIn
+	currentBudget = masterItemsTotalBudget + profit
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, exception.InternalServerError
+	}
+
+	s.log.Warn(&model.StocksSummaryResponse{
+		MasterItemsTotalBudget: masterItemsTotalBudget,
+		BudgetIn:               budgetIn,
+		BudgetOut:              budgetOut,
+		Profit:                 profit,
+		CurrentBudget:          currentBudget,
+	})
+
+	return &model.StocksSummaryResponse{
+		MasterItemsTotalBudget: masterItemsTotalBudget,
+		BudgetIn:               budgetIn,
+		BudgetOut:              budgetOut,
+		Profit:                 profit,
+		CurrentBudget:          currentBudget,
+	}, nil
 }

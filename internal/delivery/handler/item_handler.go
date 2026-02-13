@@ -362,3 +362,17 @@ func (h *ItemHandler) FindAllStocks(c *fiber.Ctx) error {
 		Paging:  pagingMetadata,
 	})
 }
+
+func (h *ItemHandler) GetStocksFinanceSummary(c *fiber.Ctx) error {
+	response, err := h.itemService.GetStocksFinanceSummary(c.Context())
+	if err != nil {
+		h.log.Warnf("failed to get stocks finance summary: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[*model.StocksSummaryResponse]{
+		Status:  fiber.StatusOK,
+		Message: "get stocks finance summary success",
+		Data:    response,
+	})
+}

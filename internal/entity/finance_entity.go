@@ -6,7 +6,7 @@ import (
 
 type Finance struct {
 	gorm.Model
-	Type        string `gorm:"size:10;not null"`
+	Type        string `gorm:"size:20;not null"`
 	Category    string `gorm:"size:30;not null"`
 	Description string `gorm:"size:100;not null"`
 	Amount      int    `gorm:"not null"`

@@ -4,6 +4,7 @@ import "time"
 
 type FinanceResponse struct {
 	ID          int       `json:"id,omitempty"`
+	Type        string    `json:"type,omitempty"`
 	Category    string    `json:"category,omitempty"`
 	Description string    `json:"description,omitempty"`
 	Amount      int       `json:"amount,omitempty"`

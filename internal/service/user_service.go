@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/exception"
@@ -87,7 +88,8 @@ func (s *UserService) Update(ctx context.Context, request *model.UpdateUserReque
 	}
 
 	user := new(entity.User)
-	if err := s.userRepository.FindById(tx, user, request.ID); err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(user, "id = ?", request.ID).Error; err != nil {
 		s.log.Errorf("failed to find user by id: %v", err)
 		return nil, exception.UserNotFoundError
 	}

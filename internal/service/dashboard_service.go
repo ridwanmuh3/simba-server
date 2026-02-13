@@ -33,19 +33,19 @@ func (s *DashboardService) GetDashboardStats(
 	defer tx.Rollback()
 
 	var (
-		totalItems  int64
-		stockIn     int64
-		stockOut    int64
-		totalBudget int64
-		budgetIn    int64
-		budgetOut   int64
+		totalItems int64
+		stockIn    int64
+		stockOut   int64
+		// totalBudget int64
+		budgetIn  int64
+		budgetOut int64
 	)
 
 	// ===============================
 	// TOTAL ITEM
 	// ===============================
 	if err := tx.
-		Model(&entity.Item{}).
+		Model(new(entity.Item)).
 		Count(&totalItems).Error; err != nil {
 		s.log.Errorf("failed to count total items: %v", err)
 		return nil, exception.InternalServerError
@@ -55,13 +55,13 @@ func (s *DashboardService) GetDashboardStats(
 	// STOCK MASUK / KELUAR
 	// ===============================
 	tx.
-		Model(&entity.StockTracking{}).
+		Model(new(entity.StockTracking)).
 		Select("COALESCE(SUM(amount),0)").
 		Where("type = ?", "IN").
 		Scan(&stockIn)
 
 	tx.
-		Model(&entity.StockTracking{}).
+		Model(new(entity.StockTracking)).
 		Select("COALESCE(SUM(amount),0)").
 		Where("type = ?", "OUT").
 		Scan(&stockOut)
@@ -69,21 +69,21 @@ func (s *DashboardService) GetDashboardStats(
 	// ===============================
 	// BUDGET TOTAL
 	// ===============================
-	tx.
-		Model(&entity.Finance{}).
-		Select("COALESCE(SUM(amount),0)").
-		Scan(&totalBudget)
+	// tx.
+	// 	Model(new(entity.Finance)).
+	// 	Select("COALESCE(SUM(amount),0)").
+	// 	Scan(&totalBudget)
 
 	tx.
-		Model(&entity.Finance{}).
+		Model(new(entity.Finance)).
 		Select("COALESCE(SUM(amount),0)").
-		Where("type = ?", "IN").
+		Where("type = ?", "PEMASUKAN").
 		Scan(&budgetIn)
 
 	tx.
-		Model(&entity.Finance{}).
+		Model(new(entity.Finance)).
 		Select("COALESCE(SUM(amount),0)").
-		Where("type = ?", "OUT").
+		Where("type = ?", "PENGELUARAN").
 		Scan(&budgetOut)
 
 	// ===============================
@@ -95,8 +95,8 @@ func (s *DashboardService) GetDashboardStats(
 		Table("finances").
 		Select(`
 			TO_CHAR(created_at, 'Mon') AS month,
-			SUM(CASE WHEN type='IN' THEN amount ELSE 0 END) AS in,
-			SUM(CASE WHEN type='OUT' THEN amount ELSE 0 END) AS out
+			SUM(CASE WHEN type='PEMASUKAN' THEN amount ELSE 0 END) AS in,
+			SUM(CASE WHEN type='PENGELUARAN' THEN amount ELSE 0 END) AS out
 		`).
 		Group("month").
 		Order("MIN(created_at)").
@@ -110,14 +110,14 @@ func (s *DashboardService) GetDashboardStats(
 	tx.
 		Table("finances").
 		Select("category, SUM(amount) as amount").
-		Where("type = ?", "OUT").
+		Where("type = ?", "PENGELUARAN").
 		Group("category").
 		Scan(&composition)
 
 	var activities []model.SystemActivity
 	tx.
 		Table("activity_logs").
-		Select("id, type, title, description, created_at").Limit(5).Order("created_at DESC").
+		Select("id, type, title, description, created_at").Limit(4).Order("created_at DESC").
 		Scan(&activities)
 
 	if err := tx.Commit().Error; err != nil {
@@ -129,7 +129,7 @@ func (s *DashboardService) GetDashboardStats(
 		TotalItems:       totalItems,
 		StockIn:          stockIn,
 		StockOut:         stockOut,
-		TotalBudget:      totalBudget,
+		TotalBudget:      budgetIn - budgetOut,
 		BudgetIn:         budgetIn,
 		BudgetOut:        budgetOut,
 		MonthlyBudget:    monthly,
