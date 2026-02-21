@@ -7,7 +7,7 @@ info:
 servers:
   - url: http://api.simba.com/v1
     description: Optional server description, e.g. Main (production) server
-  - url: http://localhost:9000
+  - url: http://localhost:3000
     description: Optional server description, e.g. Internal staging server for testing
 
 paths:

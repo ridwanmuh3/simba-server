@@ -29,7 +29,9 @@ COPY --from=builder /app/app /app/app
 
 EXPOSE 3000
 
-RUN adduser -D appuser
+RUN adduser -D appuser && \
+    mkdir -p /app/logs && \
+    chown -R appuser:appuser /app
 
 USER appuser
 
