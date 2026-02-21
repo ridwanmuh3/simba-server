@@ -10,6 +10,7 @@ type Auth struct {
 	ID       int    `json:"id"`
 	Fullname string `json:"fullname"`
 	Role     string `json:"role"`
+	Token    string `json:"-"`
 }
 
 type LoginUserRequest struct {

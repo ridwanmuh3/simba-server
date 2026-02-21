@@ -1,12 +1,11 @@
 package config
 
 import (
-	"time"
-
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/contrib/fiberzap/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/helmet"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -58,24 +57,24 @@ func Bootstrap(config *BootstrapConfig) {
 
 	SetupGlobalMiddlewares(config)
 	routeConfig.Setup()
-
-	config.App.Static("/uploads", "./uploads", fiber.Static{
-		Browse:        false,
-		CacheDuration: 24 * time.Hour,
-	})
 }
 
 func SetupGlobalMiddlewares(config *BootstrapConfig) {
+	allowedOrigins := ""
+	if config.Config.GetString("APP_MODE") == "dev" {
+		allowedOrigins = config.Config.GetString("APP_CORS_ALLOWED_ORIGINS")
+	}
+
+	config.App.Use(recover.New())
+	config.App.Use(fiberzap.New(fiberzap.Config{
+		Logger: config.Log.Desugar(),
+	}))
+	config.App.Use(helmet.New())
 	config.App.Use(cors.New(cors.Config{
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowCredentials: true,
 		AllowMethods:     "GET, POST, HEAD, PUT, DELETE, PATCH",
-		AllowOrigins:     "http://localhost:5173",
+		AllowOrigins:     allowedOrigins,
 	}))
 
-	config.App.Use(recover.New())
-
-	config.App.Use(fiberzap.New(fiberzap.Config{
-		Logger: config.Log.Desugar(),
-	}))
 }

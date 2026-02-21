@@ -24,3 +24,13 @@ type Item struct {
 func (i *Item) TableName() string {
 	return "items"
 }
+
+func (i *Item) AfterDelete(tx *gorm.DB) (err error) {
+	err = tx.Where("item_id = ?", i.ID).Delete(&StockTracking{}).Error
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}

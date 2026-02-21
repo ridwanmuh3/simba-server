@@ -32,7 +32,7 @@ func NewDB(viper *viper.Viper, log *zap.SugaredLogger) *gorm.DB {
 			Colorful:                  false,
 			IgnoreRecordNotFoundError: true,
 			ParameterizedQueries:      true,
-			LogLevel:                  logger.Info,
+			LogLevel:                  logger.Warn,
 		}),
 	})
 	if err != nil {

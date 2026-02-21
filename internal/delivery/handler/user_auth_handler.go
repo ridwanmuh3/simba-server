@@ -43,10 +43,10 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		// Secure: true,
 	})
 
-	return c.JSON(model.Response[bool]{
+	return c.JSON(model.Response[*model.Auth]{
 		Status:  fiber.StatusOK,
 		Message: "user login success",
-		Data:    true,
+		Data:    response,
 	})
 }
 

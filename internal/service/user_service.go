@@ -166,8 +166,7 @@ func (s *UserService) Delete(ctx context.Context, request *model.DeleteUserReque
 }
 
 func (s *UserService) FindById(ctx context.Context, request *model.FindByIdUserRequest) (*model.UserResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
 	if err := s.validate.Struct(request); err != nil {
 		s.log.Errorf("failed to validate request body: %v", err)
@@ -175,37 +174,26 @@ func (s *UserService) FindById(ctx context.Context, request *model.FindByIdUserR
 	}
 
 	user := new(entity.User)
-	if err := s.userRepository.FindById(tx, user, request.ID); err != nil {
+	if err := s.userRepository.FindById(db, user, request.ID); err != nil {
 		s.log.Errorf("failed to find user by id: %v", err)
 		return nil, exception.UserNotFoundError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
-		return nil, exception.InternalServerError
 	}
 
 	return converter.UserToResponse(user), nil
 }
 
 func (s *UserService) FindAll(ctx context.Context, request *model.FindAllUserRequest) ([]model.UserResponse, int64, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
 	if err := s.validate.Struct(request); err != nil {
 		s.log.Errorf("failed to validate request body: %v", err)
 		return nil, 0, err
 	}
 
-	users, total, err := s.userRepository.FindAll(tx, request)
+	users, total, err := s.userRepository.FindAll(db, request)
 	if err != nil {
 		s.log.Errorf("failed to find all users: %v", err)
 		return nil, 0, exception.UserNotFoundError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
-		return nil, 0, exception.InternalServerError
 	}
 
 	responses := make([]model.UserResponse, len(users))
@@ -217,17 +205,11 @@ func (s *UserService) FindAll(ctx context.Context, request *model.FindAllUserReq
 }
 
 func (s *UserService) GetUsersStats(ctx context.Context) (*model.UsersStatsResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
-	stats, err := s.userRepository.GetUsersStats(tx)
+	stats, err := s.userRepository.GetUsersStats(db)
 	if err != nil {
 		s.log.Errorf("failed to get users statistics: %v", err)
-		return nil, exception.InternalServerError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
 		return nil, exception.InternalServerError
 	}
 

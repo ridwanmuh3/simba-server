@@ -10,8 +10,8 @@ import (
 )
 
 func main() {
-	log := config.NewLogger()
 	viperConfig := config.NewViper()
+	log := config.NewLogger(viperConfig)
 	db := config.NewDB(viperConfig, log)
 	validate := config.NewValidator(viperConfig)
 	userRepo := repository.NewUserRepository()

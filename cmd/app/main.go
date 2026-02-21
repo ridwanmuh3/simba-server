@@ -8,7 +8,7 @@ import (
 
 func main() {
 	viperConfig := config.NewViper()
-	log := config.NewLogger()
+	log := config.NewLogger(viperConfig)
 	db := config.NewDB(viperConfig, log)
 	validate := config.NewValidator(viperConfig)
 	app := config.NewFiber(viperConfig)

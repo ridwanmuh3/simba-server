@@ -1,6 +1,5 @@
 ### TODO
 
 - [x] implement user and auth service
-- [ ] implement item service
-- [ ] implement sse service
-- [ ] implement finance service
+- [x] implement item service
+- [x] implement finance service

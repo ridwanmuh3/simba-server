@@ -382,8 +382,7 @@ func (s *ItemService) DeleteStock(ctx context.Context, request *model.DeleteStoc
 }
 
 func (s *ItemService) FindById(ctx context.Context, request *model.FindByIdItemRequest) (*model.ItemResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
 	if err := s.validate.Struct(request); err != nil {
 		s.log.Errorf("failed to validate request body: %v", err)
@@ -391,36 +390,25 @@ func (s *ItemService) FindById(ctx context.Context, request *model.FindByIdItemR
 	}
 
 	item := new(entity.Item)
-	if err := s.itemRepository.FindById(tx, item, request.ID); err != nil {
+	if err := s.itemRepository.FindById(db, item, request.ID); err != nil {
 		s.log.Errorf("failed to find item by id: %v", err)
 		return nil, exception.ItemNotFoundError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
-		return nil, exception.InternalServerError
 	}
 
 	return converter.ItemToResponse(item), nil
 }
 
 func (s *ItemService) FindAll(ctx context.Context, request *model.FindAllItemsRequest) ([]model.ItemResponse, int64, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
 	if err := s.validate.Struct(request); err != nil {
 		s.log.Errorf("failed to validate request body: %v", err)
 		return nil, 0, err
 	}
 
-	items, total, err := s.itemRepository.FindAll(tx, request)
+	items, total, err := s.itemRepository.FindAll(db, request)
 	if err != nil {
 		s.log.Errorf("failed to find all items: %v", err)
-		return nil, 0, exception.InternalServerError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
 
@@ -433,17 +421,11 @@ func (s *ItemService) FindAll(ctx context.Context, request *model.FindAllItemsRe
 }
 
 func (s *ItemService) FindAllStocks(ctx context.Context, request *model.FindAllStocksRequest) ([]model.StockResponse, int64, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
-	stocksTracking, total, err := s.itemRepository.FindAllStocks(tx, request)
+	stocksTracking, total, err := s.itemRepository.FindAllStocks(db, request)
 	if err != nil {
 		s.log.Errorf("failed to find all items stocks: %v", err)
-		return nil, 0, exception.InternalServerError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
 
@@ -456,18 +438,12 @@ func (s *ItemService) FindAllStocks(ctx context.Context, request *model.FindAllS
 }
 
 func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, int, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
 	var items []entity.Item
-	err := tx.Model(new(entity.Item)).Order("created_at DESC").Find(&items).Error
+	err := db.Model(new(entity.Item)).Order("created_at DESC").Find(&items).Error
 	if err != nil {
 		s.log.Errorf("failed to export all items: %v", err)
-		return nil, 0, exception.InternalServerError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
 
@@ -480,8 +456,7 @@ func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, in
 }
 
 func (s *ItemService) GetStocksFinanceSummary(ctx context.Context) (*model.StocksSummaryResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
 	var (
 		masterItemsTotalBudget,
@@ -491,18 +466,18 @@ func (s *ItemService) GetStocksFinanceSummary(ctx context.Context) (*model.Stock
 		currentBudget float64
 	)
 
-	tx.
+	db.
 		Model(new(entity.Item)).
 		Select("COALESCE(SUM(total_price),0)").
 		Scan(&masterItemsTotalBudget)
 
-	tx.
+	db.
 		Model(new(entity.StockTracking)).
 		Select("COALESCE(SUM(amount * unit_price),0)").
 		Where("type = ?", "IN").
 		Scan(&budgetIn)
 
-	tx.
+	db.
 		Model(new(entity.StockTracking)).
 		Select("COALESCE(SUM(amount * unit_price),0)").
 		Where("type = ?", "OUT").
@@ -510,18 +485,6 @@ func (s *ItemService) GetStocksFinanceSummary(ctx context.Context) (*model.Stock
 
 	profit = budgetOut - budgetIn
 	currentBudget = masterItemsTotalBudget + profit
-
-	if err := tx.Commit().Error; err != nil {
-		return nil, exception.InternalServerError
-	}
-
-	s.log.Warn(&model.StocksSummaryResponse{
-		MasterItemsTotalBudget: masterItemsTotalBudget,
-		BudgetIn:               budgetIn,
-		BudgetOut:              budgetOut,
-		Profit:                 profit,
-		CurrentBudget:          currentBudget,
-	})
 
 	return &model.StocksSummaryResponse{
 		MasterItemsTotalBudget: masterItemsTotalBudget,

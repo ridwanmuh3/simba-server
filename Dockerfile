@@ -27,7 +27,7 @@ WORKDIR /app
 
 COPY --from=builder /app/app /app/app
 
-EXPOSE 9000
+EXPOSE 3000
 
 RUN adduser -D appuser
 
@@ -35,5 +35,5 @@ USER appuser
 
 ENTRYPOINT ["/app/app"]
 
-HEALTHCHECK --interval=30s --timeout=5s \
-  CMD wget -qO- http://localhost:9000/health || exit 1
+HEALTHCHECK --interval=2m --timeout=5s \
+  CMD wget -qO- http://localhost:3000/health || exit 1

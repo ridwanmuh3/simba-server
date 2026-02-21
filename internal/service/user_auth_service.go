@@ -12,7 +12,7 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/util"
 )
 
-func (s *UserService) Login(ctx context.Context, request *model.LoginUserRequest) (*model.TokenResponse, error) {
+func (s *UserService) Login(ctx context.Context, request *model.LoginUserRequest) (*model.Auth, error) {
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
 
@@ -46,8 +46,11 @@ func (s *UserService) Login(ctx context.Context, request *model.LoginUserRequest
 		return nil, exception.InternalServerError
 	}
 
-	return &model.TokenResponse{
-		Token: user.Token,
+	return &model.Auth{
+		ID:       int(user.ID),
+		Fullname: user.Fullname,
+		Role:     user.Role,
+		Token:    user.Token,
 	}, nil
 }
 
@@ -84,8 +87,7 @@ func (s *UserService) Logout(ctx context.Context, request *model.LogoutUserReque
 }
 
 func (s *UserService) Verify(ctx context.Context, request *model.VerifyUserRequest) (*model.Auth, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
 	if err := s.validate.Struct(request); err != nil {
 		s.log.Errorf("failed to validate request body: %v", err)
@@ -93,14 +95,9 @@ func (s *UserService) Verify(ctx context.Context, request *model.VerifyUserReque
 	}
 
 	user := new(entity.User)
-	if err := s.userRepository.FindByToken(tx, user, request.Token); err != nil {
+	if err := s.userRepository.FindByToken(db, user, request.Token); err != nil {
 		s.log.Errorf("failed to find user by token: %v", err)
 		return nil, exception.UserNotFoundError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
-		return nil, exception.InternalServerError
 	}
 
 	return &model.Auth{

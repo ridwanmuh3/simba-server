@@ -14,6 +14,7 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/exception"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/model/converter"
+	"github.com/ridwanmuh3/simba-server/internal/util"
 )
 
 type FinanceService struct {
@@ -46,6 +47,7 @@ func (s *FinanceService) Add(ctx context.Context, request *model.AddFinanceReque
 	finance.Amount = request.Amount
 	finance.ExtraNote = request.ExtraNote
 	finance.ProofImage = request.ProofImage
+	finance.ModifiedBy = request.ModifiedBy
 
 	if err := tx.Save(finance).Error; err != nil {
 		s.log.Errorf("failed to save finance data: %v", err)
@@ -91,6 +93,10 @@ func (s *FinanceService) Update(ctx context.Context, request *model.UpdateFinanc
 	finance.ModifiedBy = request.ModifiedBy
 
 	if finance.ProofImage != request.ProofImage {
+		if err := util.DeleteFile(finance.ProofImage); err != nil {
+			s.log.Errorf("failed to delete proof image file: %v", err)
+			return nil, exception.InternalServerError
+		}
 		finance.ProofImage = request.ProofImage
 	}
 
@@ -122,6 +128,11 @@ func (s *FinanceService) Delete(ctx context.Context, request *model.DeleteFinanc
 		return false, exception.FinanceNotFound
 	}
 
+	if err := util.DeleteFile(finance.ProofImage); err != nil {
+		s.log.Errorf("failed to delete proof image file: %v", err)
+		return false, exception.InternalServerError
+	}
+
 	if err := tx.Delete(finance).Error; err != nil {
 		s.log.Errorf("failed to delete finance data: %v", err)
 		return false, exception.InternalServerError
@@ -145,8 +156,7 @@ func (s *FinanceService) Delete(ctx context.Context, request *model.DeleteFinanc
 }
 
 func (s *FinanceService) FindById(ctx context.Context, request *model.FindByIdFinanceRequest) (*model.FinanceResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
 	if err := s.validate.Struct(request); err != nil {
 		s.log.Errorf("failed to validate request body: %v", err)
@@ -154,14 +164,9 @@ func (s *FinanceService) FindById(ctx context.Context, request *model.FindByIdFi
 	}
 
 	finance := new(entity.Finance)
-	if err := tx.Where("id = ?", request.ID).First(finance).Error; err != nil {
+	if err := db.Where("id = ?", request.ID).First(finance).Error; err != nil {
 		s.log.Errorf("failed to find finance by id: %v", err)
 		return nil, exception.FinanceNotFound
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit transaction database: %v", err)
-		return nil, exception.InternalServerError
 	}
 
 	return converter.FinanceToResponse(finance), nil
@@ -203,22 +208,17 @@ func (s *FinanceService) FindAll(
 }
 
 func (s *FinanceService) Export(ctx context.Context) ([]model.FinanceResponse, int64, error) {
-	tx := s.db.WithContext(ctx).Begin()
+	db := s.db.WithContext(ctx)
 
 	var total int64
-	if err := tx.Model(new(entity.Finance)).Count(&total).Error; err != nil {
+	if err := db.Model(new(entity.Finance)).Count(&total).Error; err != nil {
 		s.log.Errorf("failed to count finance data: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
 
 	var finances []entity.Finance
-	if err := tx.Find(&finances).Error; err != nil {
+	if err := db.Find(&finances).Error; err != nil {
 		s.log.Errorf("failed to find all finances data: %v", err)
-		return nil, 0, exception.InternalServerError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit transaction database: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
 

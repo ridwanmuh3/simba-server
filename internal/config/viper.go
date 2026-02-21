@@ -8,21 +8,24 @@ import (
 )
 
 func NewViper() *viper.Viper {
-	_, err := os.Stat(".env")
-	if err != nil {
-		panic(fmt.Errorf("failed to locate env file: %v", err))
+	mode := os.Getenv("APP_MODE")
+	if mode == "" {
+		mode = "dev"
 	}
 
 	config := viper.New()
 
-	config.SetConfigName(".env")
-	config.SetConfigType("env")
-	config.AddConfigPath("./")
-	config.AddConfigPath("./../")
+	if mode == "dev" {
+		config.SetConfigFile(".env")
+		config.AddConfigPath(".")
+		config.AddConfigPath("..")
 
-	err = config.ReadInConfig()
-	if err != nil {
-		panic(fmt.Errorf("failed to read config on env file: %v", err))
+		if err := config.ReadInConfig(); err != nil {
+			panic(fmt.Errorf("failed to read config on env file: %w", err))
+		}
+	} else {
+		// Mode production: hanya membaca dari Environment Variables sistem
+		config.AutomaticEnv()
 	}
 
 	return config

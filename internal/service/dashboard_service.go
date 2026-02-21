@@ -29,8 +29,7 @@ func NewDashboardService(db *gorm.DB, logger *zap.SugaredLogger, validate *valid
 func (s *DashboardService) GetDashboardStats(
 	ctx context.Context,
 ) (*model.DashboardStatsResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
+	db := s.db.WithContext(ctx)
 
 	var (
 		totalItems int64
@@ -44,7 +43,7 @@ func (s *DashboardService) GetDashboardStats(
 	// ===============================
 	// TOTAL ITEM
 	// ===============================
-	if err := tx.
+	if err := db.
 		Model(new(entity.Item)).
 		Count(&totalItems).Error; err != nil {
 		s.log.Errorf("failed to count total items: %v", err)
@@ -54,13 +53,13 @@ func (s *DashboardService) GetDashboardStats(
 	// ===============================
 	// STOCK MASUK / KELUAR
 	// ===============================
-	tx.
+	db.
 		Model(new(entity.StockTracking)).
 		Select("COALESCE(SUM(amount),0)").
 		Where("type = ?", "IN").
 		Scan(&stockIn)
 
-	tx.
+	db.
 		Model(new(entity.StockTracking)).
 		Select("COALESCE(SUM(amount),0)").
 		Where("type = ?", "OUT").
@@ -69,18 +68,18 @@ func (s *DashboardService) GetDashboardStats(
 	// ===============================
 	// BUDGET TOTAL
 	// ===============================
-	// tx.
+	// db.
 	// 	Model(new(entity.Finance)).
 	// 	Select("COALESCE(SUM(amount),0)").
 	// 	Scan(&totalBudget)
 
-	tx.
+	db.
 		Model(new(entity.Finance)).
 		Select("COALESCE(SUM(amount),0)").
 		Where("type = ?", "PEMASUKAN").
 		Scan(&budgetIn)
 
-	tx.
+	db.
 		Model(new(entity.Finance)).
 		Select("COALESCE(SUM(amount),0)").
 		Where("type = ?", "PENGELUARAN").
@@ -91,7 +90,7 @@ func (s *DashboardService) GetDashboardStats(
 	// ===============================
 	var monthly []model.MonthlyBudgetStat
 
-	tx.
+	db.
 		Table("finances").
 		Select(`
 			TO_CHAR(created_at, 'Mon') AS month,
@@ -107,7 +106,7 @@ func (s *DashboardService) GetDashboardStats(
 	// ===============================
 	var composition []model.ExpenseComposition
 
-	tx.
+	db.
 		Table("finances").
 		Select("category, SUM(amount) as amount").
 		Where("type = ?", "PENGELUARAN").
@@ -115,15 +114,10 @@ func (s *DashboardService) GetDashboardStats(
 		Scan(&composition)
 
 	var activities []model.SystemActivity
-	tx.
+	db.
 		Table("activity_logs").
 		Select("id, type, title, description, created_at").Limit(4).Order("created_at DESC").
 		Scan(&activities)
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit transaction database: %v", err)
-		return nil, exception.InternalServerError
-	}
 
 	return &model.DashboardStatsResponse{
 		TotalItems:       totalItems,

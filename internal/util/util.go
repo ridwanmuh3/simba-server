@@ -2,6 +2,9 @@ package util
 
 import (
 	"math/rand"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -21,4 +24,15 @@ func stringWithCharset(length int, charset string) string {
 
 func GenerateRandomString(length int) string {
 	return stringWithCharset(length, charset)
+}
+
+func DeleteFile(filePath string) error {
+	cleanPath := strings.TrimPrefix(filePath, "/")
+	imagePath := filepath.Join(".", cleanPath)
+
+	if err := os.Remove(imagePath); err != nil {
+		return err
+	}
+
+	return nil
 }
