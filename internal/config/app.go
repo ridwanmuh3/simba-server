@@ -60,10 +60,7 @@ func Bootstrap(config *BootstrapConfig) {
 }
 
 func SetupGlobalMiddlewares(config *BootstrapConfig) {
-	allowedOrigins := ""
-	if config.Config.GetString("APP_MODE") == "dev" {
-		allowedOrigins = config.Config.GetString("APP_CORS_ALLOWED_ORIGINS")
-	}
+	allowedOrigins = config.Config.GetString("APP_CORS_ALLOWED_ORIGINS")
 
 	config.App.Use(recover.New())
 	config.App.Use(fiberzap.New(fiberzap.Config{
