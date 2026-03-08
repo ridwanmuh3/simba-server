@@ -571,8 +571,8 @@ func (s *ItemService) GetItemStocksSummary(ctx context.Context, request *model.G
 			(items.stock * items.unit_price) AS stock_value,
 			COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0) AS total_in,
 			COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0) AS total_out,
-			(items.stock 
-			 - COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0) 
+			(items.stock
+			 - COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0)
 			 + COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0)) AS initial_stock
 		`).
 		Joins("JOIN stock_tracks st ON st.item_id = items.id").
