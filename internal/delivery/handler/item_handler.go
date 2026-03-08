@@ -17,6 +17,7 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/exception"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/service"
+	"github.com/ridwanmuh3/simba-server/internal/util"
 )
 
 type ItemHandler struct {
@@ -370,9 +371,67 @@ func (h *ItemHandler) GetStocksFinanceSummary(c *fiber.Ctx) error {
 		return err
 	}
 
-	return c.JSON(model.Response[*model.StocksSummaryResponse]{
+	return c.JSON(model.Response[*model.StocksFinanceSummaryResponse]{
 		Status:  fiber.StatusOK,
 		Message: "get stocks finance summary success",
 		Data:    response,
 	})
+}
+
+func (h *ItemHandler) GetItemStocksSummary(c *fiber.Ctx) error {
+	request := &model.GetItemStockSummaryRequest{
+		StartDate: c.Query("start_date", ""),
+		EndDate:   c.Query("end_date", ""),
+		Page:      c.QueryInt("page", 1),
+		Size:      c.QueryInt("size", 10),
+	}
+
+	response, total, err := h.itemService.GetItemStocksSummary(c.Context(), request)
+	if err != nil {
+		h.log.Warnf("failed to get item stock summary: %v", err)
+		return err
+	}
+
+	pagingMetadata := &model.PageMetadata{
+		Page:      request.Page,
+		Size:      request.Size,
+		TotalItem: total,
+		TotalPage: int64(math.Ceil(float64(total) / float64(request.Size))),
+	}
+
+	return c.JSON(model.Response[[]model.ItemStocksSummaryResponse]{
+		Status:  fiber.StatusOK,
+		Message: "get item stock summary success",
+		Data:    response,
+		Paging:  pagingMetadata,
+	})
+}
+
+func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
+	request := &model.GetInvoiceItemsRequest{
+		DateFrom: c.Query("date_from", ""),
+		DateTo:   c.Query("date_to", ""),
+		Filename: c.Query("filename", ""),
+	}
+
+	items, err := h.itemService.GetInvoiceItems(c.Context(), request)
+	if err != nil {
+		h.log.Warnf("failed to get invoice items: %v", err)
+		return err
+	}
+
+	// TODO: Generate PDF from items
+	pdfData := &model.InvoiceData{
+		Items: items,
+	}
+
+	pdfBuffer, err := util.GenerateTemplateInvoicePDF(pdfData)
+	if err != nil {
+		h.log.Warnf("failed to generate invoice PDF: %v", err)
+		return err
+	}
+
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", "attachment; filename=invoice.pdf")
+	return c.Send(pdfBuffer.Bytes())
 }

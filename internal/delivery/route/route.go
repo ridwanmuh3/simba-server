@@ -80,6 +80,7 @@ func (c *RouteConfig) SetupItemRoute() {
 	itemRoute.Get("/export", c.ItemHandler.ExportItems)
 	itemRoute.Get("/stocks", c.ItemHandler.FindAllStocks)
 	itemRoute.Get("/stocks/summary", c.ItemHandler.GetStocksFinanceSummary)
+	itemRoute.Get("/stocks/opname", c.ItemHandler.GetItemStocksSummary)
 	itemRoute.Get("/:id", c.ItemHandler.FindById)
 	itemRoute.Get("/", c.ItemHandler.FindAll)
 }

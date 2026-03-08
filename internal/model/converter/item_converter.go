@@ -33,3 +33,14 @@ func StockToResponse(stockTracking *entity.StockTracking) *model.StockResponse {
 		Item:          *ItemToResponse(&stockTracking.Item),
 	}
 }
+
+func StockToItemStockSummaryResponse(stockTracking *entity.StockTracking) *model.ItemStocksSummaryResponse {
+	return &model.ItemStocksSummaryResponse{
+		ItemID:       stockTracking.Item.ID,
+		Name:         stockTracking.Item.Name,
+		Category:     stockTracking.Item.Category,
+		InitialStock: stockTracking.Item.InitialStock,
+		CurrentStock: stockTracking.Item.Stock,
+		StockValue:   float64(stockTracking.Item.Stock) * stockTracking.Item.UnitPrice,
+	}
+}

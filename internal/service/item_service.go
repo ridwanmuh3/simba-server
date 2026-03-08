@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -246,6 +247,9 @@ func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItem
 		if stockTracking.PreviousStock < request.Amount {
 			s.log.Errorf("failed to decrease item stock")
 			return nil, fiber.NewError(fiber.StatusBadRequest, "stock must be sufficient enough to decreased")
+		} else if stockTracking.PreviousStock >= request.Amount {
+			s.log.Errorf("stock usage cannot be more than 100%% of current stock")
+			return nil, fiber.NewError(fiber.StatusBadRequest, "stock usage cannot be more than 100% of current stock")
 		}
 		stockTracking.NewStock = stockTracking.PreviousStock - request.Amount
 	default:
@@ -437,25 +441,7 @@ func (s *ItemService) FindAllStocks(ctx context.Context, request *model.FindAllS
 	return responses, total, nil
 }
 
-func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, int, error) {
-	db := s.db.WithContext(ctx)
-
-	var items []entity.Item
-	err := db.Model(new(entity.Item)).Order("created_at DESC").Find(&items).Error
-	if err != nil {
-		s.log.Errorf("failed to export all items: %v", err)
-		return nil, 0, exception.InternalServerError
-	}
-
-	responses := make([]model.ItemResponse, len(items))
-	for i, item := range items {
-		responses[i] = *converter.ItemToResponse(&item)
-	}
-
-	return responses, len(responses), nil
-}
-
-func (s *ItemService) GetStocksFinanceSummary(ctx context.Context) (*model.StocksSummaryResponse, error) {
+func (s *ItemService) GetStocksFinanceSummary(ctx context.Context) (*model.StocksFinanceSummaryResponse, error) {
 	db := s.db.WithContext(ctx)
 
 	var (
@@ -486,11 +472,119 @@ func (s *ItemService) GetStocksFinanceSummary(ctx context.Context) (*model.Stock
 	profit = budgetOut - budgetIn
 	currentBudget = masterItemsTotalBudget + profit
 
-	return &model.StocksSummaryResponse{
+	return &model.StocksFinanceSummaryResponse{
 		MasterItemsTotalBudget: masterItemsTotalBudget,
 		BudgetIn:               budgetIn,
 		BudgetOut:              budgetOut,
 		Profit:                 profit,
 		CurrentBudget:          currentBudget,
 	}, nil
+}
+
+func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, int, error) {
+	db := s.db.WithContext(ctx)
+
+	var items []entity.Item
+	err := db.Model(new(entity.Item)).Order("created_at DESC").Find(&items).Error
+	if err != nil {
+		s.log.Errorf("failed to export all items: %v", err)
+		return nil, 0, exception.InternalServerError
+	}
+
+	responses := make([]model.ItemResponse, len(items))
+	for i, item := range items {
+		responses[i] = *converter.ItemToResponse(&item)
+	}
+
+	return responses, len(responses), nil
+}
+
+func (s *ItemService) GetInvoiceItems(ctx context.Context, request *model.GetInvoiceItemsRequest) ([]model.StockResponse, error) {
+	db := s.db.WithContext(ctx)
+
+	if err := s.validate.Struct(request); err != nil {
+		s.log.Errorf("failed to validate request body: %v", err)
+		return nil, err
+	}
+
+	var stocks []entity.StockTracking
+	query := db.Model(new(entity.StockTracking)).Preload("Item").Where("type = ?", "OUT")
+
+	if request.DateFrom != "" {
+		parsedFrom, err := time.Parse(time.RFC3339, request.DateFrom)
+		if err != nil {
+			s.log.Errorf("failed to parse date from: %v", err)
+			return nil, exception.InternalServerError
+		}
+		query = query.Where("created_at >= ?", parsedFrom)
+	}
+
+	if request.DateTo != "" {
+		parsedTo, err := time.Parse(time.RFC3339, request.DateTo)
+		if err != nil {
+			s.log.Errorf("failed to parse date to: %v", err)
+			return nil, exception.InternalServerError
+		}
+		query = query.Where("created_at <= ?", parsedTo)
+	}
+
+	if err := query.Order("item_id ASC").Find(&stocks).Error; err != nil {
+		s.log.Errorf("failed to get invoice items: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	responses := make([]model.StockResponse, len(stocks))
+	for i, stock := range stocks {
+		responses[i] = *converter.StockToResponse(&stock)
+	}
+
+	return responses, nil
+}
+
+func (s *ItemService) GetItemStocksSummary(ctx context.Context, request *model.GetItemStockSummaryRequest) ([]model.ItemStocksSummaryResponse, int64, error) {
+	db := s.db.WithContext(ctx)
+
+	if err := s.validate.Struct(request); err != nil {
+		s.log.Errorf("failed to validate request body: %v", err)
+		return nil, 0, err
+	}
+
+	var responses []model.ItemStocksSummaryResponse
+	var total int64
+	offset := (request.Page - 1) * request.Size
+
+	err := db.Table("items").
+		Joins("JOIN stock_tracks st ON st.item_id = items.id").
+		Distinct("items.id").
+		Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	err = db.Table("items").
+		Select(`
+			items.id AS item_id,
+			items.name AS name,
+			items.category AS category,
+			items.measure_unit AS measure_unit,
+			items.stock AS current_stock,
+			(items.stock * items.unit_price) AS stock_value,
+			COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0) AS total_in,
+			COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0) AS total_out,
+			(items.stock 
+			 - COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0) 
+			 + COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0)) AS initial_stock
+		`).
+		Joins("JOIN stock_tracks st ON st.item_id = items.id").
+		Group("items.id, items.name, items.category, items.measure_unit, items.stock, items.unit_price").
+		Order("items.updated_at DESC").
+		Limit(request.Size).
+		Offset(offset).
+		Find(&responses).Error
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return responses, total, nil
 }

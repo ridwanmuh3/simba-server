@@ -27,12 +27,51 @@ type StockResponse struct {
 	Item          ItemResponse `json:"item,omitzero"`
 }
 
-type StocksSummaryResponse struct {
+type StocksFinanceSummaryResponse struct {
 	MasterItemsTotalBudget float64 `json:"master_items_total_budget,omitempty"`
 	BudgetIn               float64 `json:"budget_in,omitempty"`
 	BudgetOut              float64 `json:"budget_out,omitempty"`
 	Profit                 float64 `json:"profit,omitempty"`
 	CurrentBudget          float64 `json:"current_budget,omitempty"`
+}
+
+type ItemStocksSummaryResponse struct {
+	ItemID       string  `json:"item_id,omitempty"`
+	Name         string  `json:"name,omitempty"`
+	Category     string  `json:"category,omitempty"`
+	InitialStock int     `json:"initial_stock,omitempty"`
+	MeasureUnit  string  `json:"measure_unit,omitempty"`
+	TotalIn      int     `json:"total_in,omitempty"`
+	TotalOut     int     `json:"total_out,omitempty"`
+	CurrentStock int     `json:"current_stock,omitempty"`
+	StockValue   float64 `json:"stock_value,omitempty"`
+}
+
+type InvoiceData struct {
+	// Data Perusahaan (Kiri Atas)
+	CompanyName    string
+	CompanyAddress string
+	CompanyContact string
+	LogoPath       string // Contoh: "./uploads/logo.png"
+
+	// Data Invoice (Kanan Atas)
+	InvoiceNo string
+	Date      string
+	PONo      string
+	QuoNo     string
+
+	// Data Penerima (Tengah)
+	ReceiverName    string
+	ReceiverAddress string
+
+	// Tabel & Total
+	Items      []StockResponse
+	GrandTotal float64
+
+	// Footer
+	Keterangan      string
+	Penanggungjawab string
+	Jabatan         string
 }
 
 type AddItemRequest struct {
@@ -94,4 +133,17 @@ type FindAllStocksRequest struct {
 	EndDate     string `query:"end_date,omitempty" validate:"omitempty"`
 	Page        int    `query:"page,omitempty" validate:"omitempty,min=1"`
 	Size        int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
+}
+
+type GetInvoiceItemsRequest struct {
+	Filename string `query:"filename,omitempty" validate:"omitempty,alphanum,max=100"`
+	DateFrom string `query:"date_from,omitempty" validate:"omitempty,datetime"`
+	DateTo   string `query:"date_to,omitempty" validate:"omitempty,datetime"`
+}
+
+type GetItemStockSummaryRequest struct {
+	StartDate string `query:"start_date,omitempty" validate:"omitempty,datetime"`
+	EndDate   string `query:"end_date,omitempty" validate:"omitempty,datetime"`
+	Page      int    `query:"page,omitempty" validate:"omitempty,min=1"`
+	Size      int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
 }
