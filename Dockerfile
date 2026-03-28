@@ -15,6 +15,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -o app ./cmd/app/main.go
 
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -o seed ./cmd/seed/seeder.go
+
 
 # =========================
 # 2. Runtime Stage
@@ -26,6 +29,7 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 
 COPY --from=builder /app/app /app/app
+COPY --from=builder /app/seed /app/seed
 
 EXPOSE 3000
 

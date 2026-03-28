@@ -23,13 +23,13 @@ func (s *UserService) Login(ctx context.Context, request *model.LoginUserRequest
 
 	user := new(entity.User)
 	if err := s.userRepository.FindByUsername(tx, user, request.Username); err != nil {
-		s.log.Errorf("failed to find user by username: %v", err)
-		return nil, exception.UserNotFoundError
+		s.log.Warnf("login attempt with invalid username")
+		return nil, exception.UserInvalidCredentialsError
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(request.Password)); err != nil {
-		s.log.Errorf("failed to compare password: %v", err)
-		return nil, exception.UserPasswordNotMatch
+		s.log.Warnf("login attempt with invalid password")
+		return nil, exception.UserInvalidCredentialsError
 	}
 
 	user.Token = util.GenerateRandomString(64)

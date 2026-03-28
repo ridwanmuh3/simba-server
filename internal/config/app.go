@@ -39,7 +39,7 @@ func Bootstrap(config *BootstrapConfig) {
 
 	// handler
 	userHandler := handler.NewUserHandler(config.Config, config.Log, userService)
-	itemHandler := handler.NewItemHandler(config.Config, config.Log, itemService)
+	itemHandler := handler.NewItemHandler(config.Config, config.Log, config.Validate, itemService)
 	financeHandler := handler.NewFinanceHandler(config.Config, config.Log, financeService)
 	dashboardHandler := handler.NewDashboardHandler(config.Config, config.Log, dashboardService)
 

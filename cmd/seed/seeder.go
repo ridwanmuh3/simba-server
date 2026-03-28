@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/ridwanmuh3/simba-server/internal/config"
+	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/repository"
 	"github.com/ridwanmuh3/simba-server/internal/service"
@@ -14,6 +15,18 @@ func main() {
 	log := config.NewLogger(viperConfig)
 	db := config.NewDB(viperConfig, log)
 	validate := config.NewValidator(viperConfig)
+
+	if err := db.AutoMigrate(
+		&entity.User{},
+		&entity.Item{},
+		&entity.StockTracking{},
+		&entity.Finance{},
+		&entity.ActivityLog{},
+	); err != nil {
+		log.Fatalf("failed to auto migrate: %v", err)
+	}
+	log.Info("auto migrate success")
+
 	userRepo := repository.NewUserRepository()
 	userService := service.NewUserService(db, log, validate, userRepo)
 

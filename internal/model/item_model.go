@@ -52,7 +52,7 @@ type InvoiceData struct {
 	CompanyName    string
 	CompanyAddress string
 	CompanyContact string
-	LogoPath       string // Contoh: "./uploads/logo.png"
+	LogoPath       string
 
 	// Data Invoice (Kanan Atas)
 	InvoiceNo string
@@ -72,6 +72,32 @@ type InvoiceData struct {
 	Keterangan      string
 	Penanggungjawab string
 	Jabatan         string
+}
+
+type GenerateInvoiceRequest struct {
+	// Data Perusahaan
+	CompanyName    string `json:"company_name" validate:"required,printascii,min=2,max=100"`
+	CompanyAddress string `json:"company_address" validate:"required,printascii,min=2,max=200"`
+	CompanyContact string `json:"company_contact" validate:"required,printascii,min=2,max=100"`
+
+	// Data Invoice
+	InvoiceNo string `json:"invoice_no" validate:"required,printascii,min=1,max=50"`
+	Date      string `json:"date" validate:"required,printascii,max=50"`
+	PONo      string `json:"po_no" validate:"omitempty,printascii,max=50"`
+	QuoNo     string `json:"quo_no" validate:"omitempty,printascii,max=50"`
+
+	// Data Penerima
+	ReceiverName    string `json:"receiver_name" validate:"required,printascii,min=2,max=100"`
+	ReceiverAddress string `json:"receiver_address" validate:"required,printascii,min=2,max=200"`
+
+	// Filter Tanggal
+	DateFrom string `json:"date_from" validate:"omitempty,max=50"`
+	DateTo   string `json:"date_to" validate:"omitempty,max=50"`
+
+	// Footer
+	Keterangan      string `json:"keterangan" validate:"omitempty,printascii,max=500"`
+	Penanggungjawab string `json:"penanggungjawab" validate:"required,printascii,min=2,max=100"`
+	Jabatan         string `json:"jabatan" validate:"required,printascii,min=2,max=100"`
 }
 
 type AddItemRequest struct {

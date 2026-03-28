@@ -2,12 +2,12 @@ package util
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"codeberg.org/go-pdf/fpdf"
 
@@ -16,31 +16,39 @@ import (
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-var seededRand *rand.Rand = rand.New(
-	rand.NewSource(time.Now().UnixNano()),
-)
-
-func stringWithCharset(length int, charset string) string {
+func GenerateRandomString(length int) string {
 	b := make([]byte, length)
+	charsetLen := big.NewInt(int64(len(charset)))
 	for i := range b {
-		b[i] = charset[seededRand.Intn(len(charset))]
+		n, err := rand.Int(rand.Reader, charsetLen)
+		if err != nil {
+			panic(fmt.Errorf("failed to generate random number: %w", err))
+		}
+		b[i] = charset[n.Int64()]
 	}
 	return string(b)
-}
-
-func GenerateRandomString(length int) string {
-	return stringWithCharset(length, charset)
 }
 
 func DeleteFile(filePath string) error {
 	cleanPath := strings.TrimPrefix(filePath, "/")
 	imagePath := filepath.Join(".", cleanPath)
 
-	if err := os.Remove(imagePath); err != nil {
-		return err
+	absPath, err := filepath.Abs(imagePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
 
-	return nil
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	uploadsDir := filepath.Join(cwd, "uploads")
+	if !strings.HasPrefix(absPath, uploadsDir+string(os.PathSeparator)) {
+		return fmt.Errorf("forbidden: path outside uploads directory")
+	}
+
+	return os.Remove(absPath)
 }
 
 func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) {
@@ -108,10 +116,9 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	// --- 6. ISI TABEL ---
 	pdf.SetFont("Arial", "", 10)
 	for i, item := range data.Items {
-		// Parameter terakhir (false) mematikan FillColor agar baris isi berwarna putih
 		pdf.CellFormat(15, 8, fmt.Sprintf("%d", i+1), "1", 0, "C", false, 0, "")
 		pdf.CellFormat(65, 8, item.Item.Name, "1", 0, "L", false, 0, "")
-		pdf.CellFormat(20, 8, fmt.Sprintf("%d", item.Item.Stock), "1", 0, "C", false, 0, "")
+		pdf.CellFormat(20, 8, fmt.Sprintf("%d", item.Amount), "1", 0, "C", false, 0, "")
 		pdf.CellFormat(25, 8, item.Item.MeasureUnit, "1", 0, "C", false, 0, "")
 		pdf.CellFormat(30, 8, fmt.Sprintf("Rp %.0f", item.UnitPrice), "1", 0, "R", false, 0, "")
 		pdf.CellFormat(35, 8, fmt.Sprintf("Rp %.0f", item.TotalPrice), "1", 1, "R", false, 0, "")

@@ -92,6 +92,7 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 		Type:        "ADD-ITEM",
 		Title:       "Bahan baru ditambahkan",
 		Description: fmt.Sprintf("%s - %d %s", item.Name, item.InitialStock, item.MeasureUnit),
+		ActionBy:    request.ModifiedBy,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return nil, exception.InternalServerError
@@ -162,6 +163,7 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 		Type:        "ADD-ITEM-BATCHES",
 		Title:       "Import bahan baru ditambahkan",
 		Description: "Format CSV",
+		ActionBy:    request.Items[0].ModifiedBy,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return exception.InternalServerError
@@ -245,11 +247,8 @@ func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItem
 		stockTracking.NewStock = stockTracking.PreviousStock + request.Amount
 	case "OUT":
 		if stockTracking.PreviousStock < request.Amount {
-			s.log.Errorf("failed to decrease item stock")
+			s.log.Errorf("failed to decrease item stock: insufficient stock")
 			return nil, fiber.NewError(fiber.StatusBadRequest, "stock must be sufficient enough to decreased")
-		} else if stockTracking.PreviousStock >= request.Amount {
-			s.log.Errorf("stock usage cannot be more than 100%% of current stock")
-			return nil, fiber.NewError(fiber.StatusBadRequest, "stock usage cannot be more than 100% of current stock")
 		}
 		stockTracking.NewStock = stockTracking.PreviousStock - request.Amount
 	default:
@@ -275,6 +274,7 @@ func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItem
 		Type:        "UPDATE-STOCK",
 		Title:       "Stok bahan diperbarui",
 		Description: fmt.Sprintf("%s - %d %s", item.Name, item.Stock, item.MeasureUnit),
+		ActionBy:    request.ModifiedBy,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return nil, exception.InternalServerError
@@ -311,7 +311,8 @@ func (s *ItemService) Delete(ctx context.Context, request *model.DeleteItemReque
 	if err := tx.Create(&entity.ActivityLog{
 		Type:        "DELETE-ITEM",
 		Title:       "Data bahan dihapus",
-		Description: fmt.Sprintf("%s", item.Name),
+		Description: item.Name,
+		ActionBy:    item.ModifiedBy,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return false, exception.InternalServerError
@@ -372,6 +373,7 @@ func (s *ItemService) DeleteStock(ctx context.Context, request *model.DeleteStoc
 		Type:        "REDUCE-STOCK",
 		Title:       "Data stock bahan diperbarui",
 		Description: fmt.Sprintf("%s - %d %s", item.Name, item.Stock, item.MeasureUnit),
+		ActionBy:    item.ModifiedBy,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return false, exception.InternalServerError
@@ -528,7 +530,7 @@ func (s *ItemService) GetInvoiceItems(ctx context.Context, request *model.GetInv
 		query = query.Where("created_at <= ?", parsedTo)
 	}
 
-	if err := query.Order("item_id ASC").Find(&stocks).Error; err != nil {
+	if err := query.Order("item_id ASC").Limit(500).Find(&stocks).Error; err != nil {
 		s.log.Errorf("failed to get invoice items: %v", err)
 		return nil, exception.InternalServerError
 	}

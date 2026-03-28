@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -23,13 +25,15 @@ import (
 type ItemHandler struct {
 	config      *viper.Viper
 	log         *zap.SugaredLogger
+	validate    *validator.Validate
 	itemService *service.ItemService
 }
 
-func NewItemHandler(config *viper.Viper, logger *zap.SugaredLogger, itemService *service.ItemService) *ItemHandler {
+func NewItemHandler(config *viper.Viper, logger *zap.SugaredLogger, validate *validator.Validate, itemService *service.ItemService) *ItemHandler {
 	return &ItemHandler{
 		config:      config,
 		log:         logger,
+		validate:    validate,
 		itemService: itemService,
 	}
 }
@@ -408,21 +412,52 @@ func (h *ItemHandler) GetItemStocksSummary(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
-	request := &model.GetInvoiceItemsRequest{
-		DateFrom: c.Query("date_from", ""),
-		DateTo:   c.Query("date_to", ""),
-		Filename: c.Query("filename", ""),
+	request := new(model.GenerateInvoiceRequest)
+	if err := c.BodyParser(request); err != nil {
+		h.log.Warnf("failed to parse invoice request body: %v", err)
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 
-	items, err := h.itemService.GetInvoiceItems(c.Context(), request)
+	if err := h.validate.Struct(request); err != nil {
+		h.log.Warnf("failed to validate invoice request: %v", err)
+		return fiber.NewError(fiber.StatusBadRequest, "validation failed")
+	}
+
+	invoiceItemsReq := &model.GetInvoiceItemsRequest{
+		DateFrom: request.DateFrom,
+		DateTo:   request.DateTo,
+	}
+
+	items, err := h.itemService.GetInvoiceItems(c.Context(), invoiceItemsReq)
 	if err != nil {
 		h.log.Warnf("failed to get invoice items: %v", err)
 		return err
 	}
 
-	// TODO: Generate PDF from items
+	if len(items) == 0 {
+		return fiber.NewError(fiber.StatusNotFound, "tidak ada data bahan keluar pada rentang tanggal yang dipilih")
+	}
+
+	var grandTotal float64
+	for _, item := range items {
+		grandTotal += item.TotalPrice
+	}
+
 	pdfData := &model.InvoiceData{
-		Items: items,
+		CompanyName:     request.CompanyName,
+		CompanyAddress:  request.CompanyAddress,
+		CompanyContact:  request.CompanyContact,
+		InvoiceNo:       request.InvoiceNo,
+		Date:            request.Date,
+		PONo:            request.PONo,
+		QuoNo:           request.QuoNo,
+		ReceiverName:    request.ReceiverName,
+		ReceiverAddress: request.ReceiverAddress,
+		Items:           items,
+		GrandTotal:      grandTotal,
+		Keterangan:      request.Keterangan,
+		Penanggungjawab: request.Penanggungjawab,
+		Jabatan:         request.Jabatan,
 	}
 
 	pdfBuffer, err := util.GenerateTemplateInvoicePDF(pdfData)
@@ -431,7 +466,16 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		return err
 	}
 
+	// Sanitize filename to prevent header injection
+	safeInvoiceNo := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, request.InvoiceNo)
+	filename := url.PathEscape(fmt.Sprintf("invoice-%s.pdf", safeInvoiceNo))
+
 	c.Set("Content-Type", "application/pdf")
-	c.Set("Content-Disposition", "attachment; filename=invoice.pdf")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	return c.Send(pdfBuffer.Bytes())
 }

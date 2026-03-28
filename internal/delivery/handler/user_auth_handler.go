@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -34,13 +35,20 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		expirationTime = time.Now().Add(time.Duration(expirationTimeEnv) * time.Minute)
 	}
 
+	isProduction := strings.HasPrefix(h.config.GetString("APP_CORS_ALLOWED_ORIGINS"), "https")
+	sameSite := "Lax"
+	if isProduction {
+		sameSite = "Strict"
+	}
+
 	c.Cookie(&fiber.Cookie{
 		Name:     "token",
 		Value:    response.Token,
 		Path:     "/",
 		Expires:  expirationTime,
 		HTTPOnly: true,
-		// Secure: true,
+		Secure:   isProduction,
+		SameSite: sameSite,
 	})
 
 	return c.JSON(model.Response[*model.Auth]{
@@ -62,6 +70,12 @@ func (h *UserHandler) Logout(c *fiber.Ctx) error {
 		return err
 	}
 
+	isProduction := strings.HasPrefix(h.config.GetString("APP_CORS_ALLOWED_ORIGINS"), "https")
+	sameSite := "Lax"
+	if isProduction {
+		sameSite = "Strict"
+	}
+
 	c.Cookie(&fiber.Cookie{
 		Name:     "token",
 		Value:    "",
@@ -69,7 +83,8 @@ func (h *UserHandler) Logout(c *fiber.Ctx) error {
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 		HTTPOnly: true,
-		// Secure: true,
+		Secure:   isProduction,
+		SameSite: sameSite,
 	})
 
 	return c.JSON(model.Response[bool]{

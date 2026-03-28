@@ -15,5 +15,6 @@ func NewFiber(config *viper.Viper) *fiber.App {
 		JSONDecoder:  sonic.Unmarshal,
 		ErrorHandler: exception.NewErrorHandler(),
 		Prefork:      config.GetBool("APP_PREFORK"),
+		BodyLimit:    15 * 1024 * 1024, // 15MB max request body
 	})
 }

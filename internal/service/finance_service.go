@@ -58,6 +58,7 @@ func (s *FinanceService) Add(ctx context.Context, request *model.AddFinanceReque
 		Type:        "ADD-FINANCE",
 		Title:       "Data keuangan ditambahkan",
 		Description: fmt.Sprintf("%s - %s", finance.Category, finance.Description),
+		ActionBy:    request.ModifiedBy,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return nil, exception.InternalServerError
@@ -142,6 +143,7 @@ func (s *FinanceService) Delete(ctx context.Context, request *model.DeleteFinanc
 		Type:        "DELETE-FINANCE",
 		Title:       "Data keuangan dihapus",
 		Description: fmt.Sprintf("%s - %s", finance.Category, finance.Description),
+		ActionBy:    finance.ModifiedBy,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return false, exception.InternalServerError

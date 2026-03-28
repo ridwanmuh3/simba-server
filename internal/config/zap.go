@@ -26,7 +26,7 @@ func NewLogger(config *viper.Viper) *zap.SugaredLogger {
 
 		logFileName := filepath.Join(logDir, fmt.Sprintf("simba-server-%d.log", time.Now().Unix()))
 
-		file, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		file, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if err != nil {
 			panic(fmt.Errorf("failed to create log file: %v", err))
 		}
