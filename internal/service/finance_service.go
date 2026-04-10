@@ -240,7 +240,7 @@ func (s *FinanceService) FilterFinance(query *model.FindAllFinanceRequest) func(
 				tx.Where("category ILIKE ?", searchPattern).
 					Or("description ILIKE ?", searchPattern).
 					Or("extra_note ILIKE ?", searchPattern).
-					Or("type ILIKE ?"),
+					Or("type ILIKE ?", searchPattern),
 			)
 		}
 

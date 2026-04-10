@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # =========================
 # 1. Builder Stage
 # =========================
@@ -8,14 +10,20 @@ RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /app
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -o app ./cmd/app/main.go
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -o seed ./cmd/seed/seeder.go
 
 
@@ -33,7 +41,7 @@ COPY --from=builder /app/seed /app/seed
 
 EXPOSE 3000
 
-RUN adduser -D appuser && \ 
+RUN adduser -D appuser && \
     mkdir -p /app/logs && \
     chown -R appuser:appuser /app
 

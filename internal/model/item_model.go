@@ -76,28 +76,28 @@ type InvoiceData struct {
 
 type GenerateInvoiceRequest struct {
 	// Data Perusahaan
-	CompanyName    string `json:"company_name" validate:"required,printascii,min=2,max=100"`
-	CompanyAddress string `json:"company_address" validate:"required,printascii,min=2,max=200"`
-	CompanyContact string `json:"company_contact" validate:"required,printascii,min=2,max=100"`
+	CompanyName    string `json:"company_name" validate:"required,min=2,max=100"`
+	CompanyAddress string `json:"company_address" validate:"required,min=2,max=200"`
+	CompanyContact string `json:"company_contact" validate:"required,min=2,max=100"`
 
 	// Data Invoice
-	InvoiceNo string `json:"invoice_no" validate:"required,printascii,min=1,max=50"`
-	Date      string `json:"date" validate:"required,printascii,max=50"`
-	PONo      string `json:"po_no" validate:"omitempty,printascii,max=50"`
-	QuoNo     string `json:"quo_no" validate:"omitempty,printascii,max=50"`
+	InvoiceNo string `json:"invoice_no" validate:"required,min=1,max=50"`
+	Date      string `json:"date" validate:"required,max=50"`
+	PONo      string `json:"po_no" validate:"omitempty,max=50"`
+	QuoNo     string `json:"quo_no" validate:"omitempty,max=50"`
 
 	// Data Penerima
-	ReceiverName    string `json:"receiver_name" validate:"required,printascii,min=2,max=100"`
-	ReceiverAddress string `json:"receiver_address" validate:"required,printascii,min=2,max=200"`
+	ReceiverName    string `json:"receiver_name" validate:"required,min=2,max=100"`
+	ReceiverAddress string `json:"receiver_address" validate:"required,min=2,max=200"`
 
 	// Filter Tanggal
 	DateFrom string `json:"date_from" validate:"omitempty,max=50"`
 	DateTo   string `json:"date_to" validate:"omitempty,max=50"`
 
 	// Footer
-	Keterangan      string `json:"keterangan" validate:"omitempty,printascii,max=500"`
-	Penanggungjawab string `json:"penanggungjawab" validate:"required,printascii,min=2,max=100"`
-	Jabatan         string `json:"jabatan" validate:"required,printascii,min=2,max=100"`
+	Keterangan      string `json:"keterangan" validate:"omitempty,max=500"`
+	Penanggungjawab string `json:"penanggungjawab" validate:"required,min=2,max=100"`
+	Jabatan         string `json:"jabatan" validate:"required,min=2,max=100"`
 }
 
 type AddItemRequest struct {
@@ -163,13 +163,13 @@ type FindAllStocksRequest struct {
 
 type GetInvoiceItemsRequest struct {
 	Filename string `query:"filename,omitempty" validate:"omitempty,alphanum,max=100"`
-	DateFrom string `query:"date_from,omitempty" validate:"omitempty,datetime"`
-	DateTo   string `query:"date_to,omitempty" validate:"omitempty,datetime"`
+	DateFrom string `query:"date_from,omitempty" validate:"omitempty,max=50"`
+	DateTo   string `query:"date_to,omitempty" validate:"omitempty,max=50"`
 }
 
 type GetItemStockSummaryRequest struct {
-	StartDate string `query:"start_date,omitempty" validate:"omitempty,datetime"`
-	EndDate   string `query:"end_date,omitempty" validate:"omitempty,datetime"`
+	StartDate string `query:"start_date,omitempty" validate:"omitempty,max=50"`
+	EndDate   string `query:"end_date,omitempty" validate:"omitempty,max=50"`
 	Page      int    `query:"page,omitempty" validate:"omitempty,min=1"`
 	Size      int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
 }

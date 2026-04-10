@@ -14,6 +14,7 @@ func FinanceToResponse(finance *entity.Finance) *model.FinanceResponse {
 		Amount:      finance.Amount,
 		ExtraNote:   finance.ExtraNote,
 		ProofImage:  finance.ProofImage,
+		ModifiedBy:  finance.ModifiedBy,
 		CreatedAt:   finance.CreatedAt,
 	}
 }

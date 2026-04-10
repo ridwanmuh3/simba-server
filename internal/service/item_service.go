@@ -300,7 +300,7 @@ func (s *ItemService) Delete(ctx context.Context, request *model.DeleteItemReque
 	item := new(entity.Item)
 	if err := s.itemRepository.FindById(tx, item, request.ID); err != nil {
 		s.log.Errorf("failed to find item by id: %v", err)
-		return false, exception.UserNotFoundError
+		return false, exception.ItemNotFoundError
 	}
 
 	if err := s.itemRepository.Delete(tx, item); err != nil {
@@ -513,21 +513,21 @@ func (s *ItemService) GetInvoiceItems(ctx context.Context, request *model.GetInv
 	query := db.Model(new(entity.StockTracking)).Preload("Item").Where("type = ?", "OUT")
 
 	if request.DateFrom != "" {
-		parsedFrom, err := time.Parse(time.RFC3339, request.DateFrom)
+		parsedFrom, err := time.Parse(time.RFC3339Nano, request.DateFrom)
 		if err != nil {
 			s.log.Errorf("failed to parse date from: %v", err)
 			return nil, exception.InternalServerError
 		}
-		query = query.Where("created_at >= ?", parsedFrom)
+		query = query.Where("created_at >= ?", parsedFrom.UTC())
 	}
 
 	if request.DateTo != "" {
-		parsedTo, err := time.Parse(time.RFC3339, request.DateTo)
+		parsedTo, err := time.Parse(time.RFC3339Nano, request.DateTo)
 		if err != nil {
 			s.log.Errorf("failed to parse date to: %v", err)
 			return nil, exception.InternalServerError
 		}
-		query = query.Where("created_at <= ?", parsedTo)
+		query = query.Where("created_at < ?", parsedTo.UTC().Add(24*time.Hour))
 	}
 
 	if err := query.Order("item_id ASC").Limit(500).Find(&stocks).Error; err != nil {
