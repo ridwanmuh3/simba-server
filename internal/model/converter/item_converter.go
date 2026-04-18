@@ -15,6 +15,7 @@ func ItemToResponse(item *entity.Item) *model.ItemResponse {
 		MeasureUnit:  item.MeasureUnit,
 		UnitPrice:    item.UnitPrice,
 		TotalPrice:   item.TotalPrice,
+		CreatedAt:    item.CreatedAt,
 	}
 }
 

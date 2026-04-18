@@ -11,7 +11,7 @@ Dokumen ini berisi daftar pembaruan sistem yang direncanakan, dikategorikan berd
 - [ ] **Rate Limiting pada Auth Endpoints** — Tambahkan rate limiter (misal: 5 request/menit) pada `/api/auth/login` untuk mencegah brute-force attack
 - [ ] **CSRF Token Protection** — Implementasikan CSRF token pada semua state-changing request (POST/PUT/DELETE) menggunakan Fiber CSRF middleware
 - [ ] **Password Complexity Rules** — Tambahkan validasi kompleksitas password (minimal 1 huruf besar, 1 angka, 1 karakter spesial, minimum 8 karakter)
-- [ ] **Token TTL & Rotation** — Implementasikan expiry time pada token di database, bukan hanya di cookie. Tambahkan mekanisme token refresh otomatis
+- [x] **Token TTL & Rotation** — Implementasikan expiry time pada token di database, bukan hanya di cookie. Tambahkan mekanisme token refresh otomatis
 
 ### Data & Validation
 

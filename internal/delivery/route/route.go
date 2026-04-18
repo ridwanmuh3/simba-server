@@ -17,6 +17,7 @@ type RouteConfig struct {
 	ItemHandler      *handler.ItemHandler
 	FinanceHandler   *handler.FinanceHandler
 	DashboardHandler *handler.DashboardHandler
+	SettingHandler   *handler.SettingHandler
 	AuthMiddleware   fiber.Handler
 	Log              *zap.SugaredLogger
 }
@@ -29,6 +30,7 @@ func (c *RouteConfig) Setup() {
 	c.SetupItemRoute()
 	c.SetupFinanceRoute()
 	c.SetupDashboardRoute()
+	c.SetupSettingRoute()
 }
 
 func (c *RouteConfig) SetupPublicRoute() {
@@ -50,6 +52,7 @@ func (c *RouteConfig) SetupAuthRoute() {
 	authRoute.Post("/login", c.UserHandler.Login)
 	authRoute.Delete("/logout", c.AuthMiddleware, c.UserHandler.Logout)
 	authRoute.Get("/_current", c.AuthMiddleware, c.UserHandler.Current)
+	authRoute.Post("/refresh", c.UserHandler.Refresh)
 }
 
 func (c *RouteConfig) SetupUserRoute() {
@@ -78,6 +81,7 @@ func (c *RouteConfig) SetupItemRoute() {
 	itemRoute.Delete("/:id/stocks/:stock_id", c.ItemHandler.DeleteStock)
 	itemRoute.Delete("/:id", c.ItemHandler.Delete)
 	itemRoute.Post("/invoice", c.ItemHandler.GetInvoiceItems)
+	itemRoute.Get("/invoices", c.ItemHandler.GetInvoiceHistory)
 	itemRoute.Get("/export", c.ItemHandler.ExportItems)
 	itemRoute.Get("/stocks", c.ItemHandler.FindAllStocks)
 	itemRoute.Get("/stocks/summary", c.ItemHandler.GetStocksFinanceSummary)
@@ -112,4 +116,14 @@ func (c *RouteConfig) SetupUploadRoute() {
 		Browse:        false,
 		CacheDuration: 24 * time.Hour,
 	})
+}
+
+func (c *RouteConfig) SetupSettingRoute() {
+	settingRoute := c.App.Group("/api/settings")
+
+	settingRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"))
+
+	settingRoute.Get("/company", c.SettingHandler.GetCompanyProfile)
+	settingRoute.Put("/company", c.SettingHandler.UpdateCompanyProfile)
+	settingRoute.Get("/next-document-number", c.SettingHandler.GetNextDocumentNumbers)
 }

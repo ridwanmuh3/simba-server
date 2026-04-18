@@ -20,10 +20,24 @@ type UserService struct {
 	db             *gorm.DB
 	log            *zap.SugaredLogger
 	validate       *validator.Validate
-	userRepository *repository.UserRepository
+	userRepository UserRepository
 }
 
-func NewUserService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, userRepository *repository.UserRepository) *UserService {
+type UserRepository interface {
+	CountByUsername(db *gorm.DB, username string) (int64, error)
+	Save(db *gorm.DB, entity *entity.User) error
+	FindById(db *gorm.DB, entity *entity.User, id any) error
+	Delete(db *gorm.DB, entity *entity.User) error
+	FindByUsername(db *gorm.DB, user *entity.User, username string) error
+	FindByRefreshToken(db *gorm.DB, user *entity.User, token string) error
+	FindByToken(db *gorm.DB, user *entity.User, token string) error
+	FindAll(db *gorm.DB, query *model.FindAllUserRequest) ([]entity.User, int64, error)
+	GetUsersStats(db *gorm.DB) (*entity.UserStats, error)
+}
+
+var _ UserRepository = (*repository.UserRepository)(nil)
+
+func NewUserService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, userRepository UserRepository) *UserService {
 	return &UserService{
 		db:             db,
 		log:            logger,

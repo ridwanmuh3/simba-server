@@ -8,10 +8,10 @@ import (
 
 type Item struct {
 	ID           string  `gorm:"size:30;primaryKey;index;not null"`
-	Name         string  `gorm:"size:90;uniqueIndex;not null"`
+	Name         string  `gorm:"size:90;not null"`
 	Category     string  `gorm:"size:30;not null"`
-	InitialStock int     `gorm:"not null"`
-	Stock        int     `gorm:"not null"`
+	InitialStock float64 `gorm:"not null"`
+	Stock        float64 `gorm:"not null"`
 	MeasureUnit  string  `gorm:"size:30;not null"`
 	UnitPrice    float64 `gorm:"not null"`
 	TotalPrice   float64 `gorm:"not null"`

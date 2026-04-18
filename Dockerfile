@@ -1,8 +1,5 @@
 # syntax=docker/dockerfile:1
 
-# =========================
-# 1. Builder Stage
-# =========================
 FROM golang:1.25.5-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
@@ -16,38 +13,38 @@ RUN --mount=type=cache,target=/root/go/pkg/mod \
 
 COPY . .
 
-RUN --mount=type=cache,target=/root/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -o app ./cmd/app/main.go
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -o seed ./cmd/seed/seeder.go
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -ldflags="-s -w" -o /out/app     ./cmd/app/main.go && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -ldflags="-s -w" -o /out/seed    ./cmd/seed/seeder.go && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -ldflags="-s -w" -o /out/migrate ./cmd/migrate/main.go
 
 
-# =========================
-# 2. Runtime Stage
-# =========================
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata wget
 
 WORKDIR /app
 
-COPY --from=builder /app/app /app/app
-COPY --from=builder /app/seed /app/seed
+COPY --from=builder /out/app     /app/app
+COPY --from=builder /out/seed    /app/seed
+COPY --from=builder /out/migrate /app/migrate
+
+RUN adduser -D -H -u 10001 appuser && \
+    mkdir -p /app/logs /app/uploads && \
+    chown -R appuser:appuser /app
+
+USER 10001:10001
 
 EXPOSE 3000
 
-RUN adduser -D appuser && \
-    mkdir -p /app/logs && \
-    chown -R appuser:appuser /app
-
-USER appuser
-
 ENTRYPOINT ["/app/app"]
 
-HEALTHCHECK --interval=2m --timeout=5s \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
   CMD wget -qO- http://localhost:3000/health || exit 1

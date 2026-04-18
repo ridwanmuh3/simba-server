@@ -7,22 +7,35 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/exception"
 	"github.com/ridwanmuh3/simba-server/internal/model"
+	"github.com/ridwanmuh3/simba-server/internal/repository"
 )
 
 type DashboardService struct {
-	db       *gorm.DB
-	log      *zap.SugaredLogger
-	validate *validator.Validate
+	db                  *gorm.DB
+	log                 *zap.SugaredLogger
+	validate            *validator.Validate
+	dashboardRepository DashboardRepository
 }
 
-func NewDashboardService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate) *DashboardService {
+type DashboardRepository interface {
+	GetItemCount(db *gorm.DB) (int64, error)
+	SumStockByType(db *gorm.DB, stockType string) (int64, error)
+	GetFinanceSummary(db *gorm.DB) (int64, int64, error)
+	GetMonthlyStats(db *gorm.DB) ([]model.MonthlyBudgetStat, error)
+	GetExpenseComposition(db *gorm.DB) ([]model.ExpenseComposition, error)
+	GetRecentActivities(db *gorm.DB, limit int) ([]model.SystemActivity, error)
+}
+
+var _ DashboardRepository = (*repository.DashboardRepository)(nil)
+
+func NewDashboardService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, dashboardRepository DashboardRepository) *DashboardService {
 	return &DashboardService{
-		db:       db,
-		log:      logger,
-		validate: validate,
+		db:                  db,
+		log:                 logger,
+		validate:            validate,
+		dashboardRepository: dashboardRepository,
 	}
 }
 
@@ -31,93 +44,47 @@ func (s *DashboardService) GetDashboardStats(
 ) (*model.DashboardStatsResponse, error) {
 	db := s.db.WithContext(ctx)
 
-	var (
-		totalItems int64
-		stockIn    int64
-		stockOut   int64
-		// totalBudget int64
-		budgetIn  int64
-		budgetOut int64
-	)
-
-	// ===============================
-	// TOTAL ITEM
-	// ===============================
-	if err := db.
-		Model(new(entity.Item)).
-		Count(&totalItems).Error; err != nil {
+	totalItems, err := s.dashboardRepository.GetItemCount(db)
+	if err != nil {
 		s.log.Errorf("failed to count total items: %v", err)
 		return nil, exception.InternalServerError
 	}
 
-	// ===============================
-	// STOCK MASUK / KELUAR
-	// ===============================
-	db.
-		Model(new(entity.StockTracking)).
-		Select("COALESCE(SUM(amount),0)").
-		Where("type = ?", "IN").
-		Scan(&stockIn)
+	stockIn, err := s.dashboardRepository.SumStockByType(db, "IN")
+	if err != nil {
+		s.log.Errorf("failed to sum IN stocks: %v", err)
+		return nil, exception.InternalServerError
+	}
 
-	db.
-		Model(new(entity.StockTracking)).
-		Select("COALESCE(SUM(amount),0)").
-		Where("type = ?", "OUT").
-		Scan(&stockOut)
+	stockOut, err := s.dashboardRepository.SumStockByType(db, "OUT")
+	if err != nil {
+		s.log.Errorf("failed to sum OUT stocks: %v", err)
+		return nil, exception.InternalServerError
+	}
 
-	// ===============================
-	// BUDGET TOTAL
-	// ===============================
-	// db.
-	// 	Model(new(entity.Finance)).
-	// 	Select("COALESCE(SUM(amount),0)").
-	// 	Scan(&totalBudget)
+	budgetIn, budgetOut, err := s.dashboardRepository.GetFinanceSummary(db)
+	if err != nil {
+		s.log.Errorf("failed to get finance summary: %v", err)
+		return nil, exception.InternalServerError
+	}
 
-	db.
-		Model(new(entity.Finance)).
-		Select("COALESCE(SUM(amount),0)").
-		Where("type = ?", "PEMASUKAN").
-		Scan(&budgetIn)
+	monthly, err := s.dashboardRepository.GetMonthlyStats(db)
+	if err != nil {
+		s.log.Errorf("failed to get monthly stats: %v", err)
+		return nil, exception.InternalServerError
+	}
 
-	db.
-		Model(new(entity.Finance)).
-		Select("COALESCE(SUM(amount),0)").
-		Where("type = ?", "PENGELUARAN").
-		Scan(&budgetOut)
+	composition, err := s.dashboardRepository.GetExpenseComposition(db)
+	if err != nil {
+		s.log.Errorf("failed to get expense composition: %v", err)
+		return nil, exception.InternalServerError
+	}
 
-	// ===============================
-	// GRAFIK BULANAN
-	// ===============================
-	var monthly []model.MonthlyBudgetStat
-
-	db.
-		Table("finances").
-		Select(`
-			TO_CHAR(created_at, 'Mon') AS month,
-			SUM(CASE WHEN type='PEMASUKAN' THEN amount ELSE 0 END) AS in,
-			SUM(CASE WHEN type='PENGELUARAN' THEN amount ELSE 0 END) AS out
-		`).
-		Group("month").
-		Order("MIN(created_at)").
-		Scan(&monthly)
-
-	// ===============================
-	// KOMPOSISI PENGELUARAN
-	// ===============================
-	var composition []model.ExpenseComposition
-
-	db.
-		Table("finances").
-		Select("category, SUM(amount) as amount").
-		Where("type = ?", "PENGELUARAN").
-		Group("category").
-		Scan(&composition)
-
-	var activities []model.SystemActivity
-	db.
-		Table("activity_logs").
-		Select("id, type, title, description, created_at").Limit(4).Order("created_at DESC").
-		Scan(&activities)
+	activities, err := s.dashboardRepository.GetRecentActivities(db, 4)
+	if err != nil {
+		s.log.Errorf("failed to get recent activities: %v", err)
+		return nil, exception.InternalServerError
+	}
 
 	return &model.DashboardStatsResponse{
 		TotalItems:       totalItems,

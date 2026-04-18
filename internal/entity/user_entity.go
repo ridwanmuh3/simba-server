@@ -8,13 +8,16 @@ import (
 
 type User struct {
 	gorm.Model
-	Username   string `gorm:"size:30;uniqueIndex;not null"`
-	Fullname   string `gorm:"size:50;not null"`
-	Role       string `gorm:"size:20;not null"`
-	Password   string `gorm:"size:255;not null"`
-	Token      string `gorm:"size:255;index"`
-	IsActive   bool   `gorm:"type:boolean;default:false"`
-	LastActive time.Time
+	Username         string `gorm:"size:30;uniqueIndex;not null"`
+	Fullname         string `gorm:"size:50;not null"`
+	Role             string `gorm:"size:20;not null"`
+	Password         string `gorm:"size:255;not null"`
+	Token            string `gorm:"size:64;index"`
+	TokenExpiresAt   time.Time
+	RefreshToken     string `gorm:"size:64;index"`
+	RefreshExpiresAt time.Time
+	IsActive         bool `gorm:"type:boolean;default:false"`
+	LastActive       time.Time
 }
 
 func (u *User) TableName() string {

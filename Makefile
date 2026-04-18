@@ -1,5 +1,4 @@
-ENV_FILE ?= .env
-COMPOSE = docker compose --env-file $(ENV_FILE)
+# ROOT := $(abspath ..)
 
 run-dev:
 	APP_MODE=dev go run ./cmd/app/main.go
@@ -7,36 +6,20 @@ run-dev:
 run-seed:
 	APP_MODE=dev go run ./cmd/seed/seeder.go
 
+run-migrate:
+	APP_MODE=dev go run ./cmd/migrate/main.go
+
 run-build:
-	APP_MODE=dev CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ./bin/app ./cmd/app/main.go && chmod +x ./bin/app && ./bin/app
+	CGO_ENABLED=0 go build -o ./bin/app     ./cmd/app/main.go
+	CGO_ENABLED=0 go build -o ./bin/migrate ./cmd/migrate/main.go
+	CGO_ENABLED=0 go build -o ./bin/seed    ./cmd/seed/seeder.go
 
-compose-up:
-	$(COMPOSE) up -d
+test:
+	go test ./...
 
-compose-down:
-	$(COMPOSE) down
+tidy:
+	go mod tidy
 
-compose-clean:
-	$(COMPOSE) down -v
-
-compose-logs:
-	$(COMPOSE) logs -f
-
-docker-build:
-	docker build -t simba-api-server:latest .
-
-docker-run:
-	docker run -p 3000:3000 --env-file .env simba-api-server:latest
-
-atlas-inspect:
-	atlas schema inspect --env gorm -u "env://src"
-
-atlas-apply:
-	atlas schema apply --env gorm -u "env://dev"
-
-atlas-clean:
-	atlas schema apply --env gorm --to file://empty.hcl -u "env://dev"
-
-atlas-migrate:
-	atlas migrate diff --env gorm 
-
+# Delegate stack orchestration to the root Makefile.
+# %:
+# 	$(MAKE) -C $(ROOT) $@

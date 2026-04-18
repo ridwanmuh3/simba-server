@@ -2,7 +2,6 @@ package repository
 
 import (
 	"slices"
-	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -68,77 +67,26 @@ func (r *ItemRepository) CountAll(db *gorm.DB) (int64, error) {
 
 func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
-		if searchQuery := query.SearchQuery; searchQuery != "" {
-			searchQuery = "%" + searchQuery + "%"
-			tx = tx.Where("id ILIKE ? OR name ILIKE ? OR category ILIKE ?", searchQuery, searchQuery, searchQuery)
-		}
-
-		if query.StartDate != "" {
-			parsedStart, err := time.Parse(time.RFC3339, query.StartDate)
-			if err == nil {
-				startOfDay := parsedStart.
-					In(time.Local).
-					Truncate(24 * time.Hour)
-
-				tx = tx.Where("created_at >= ?", startOfDay)
-			}
-		}
-
-		if query.EndDate != "" {
-			parsedEnd, err := time.Parse(time.RFC3339, query.EndDate)
-			if err == nil {
-				endOfDay := parsedEnd.
-					In(time.Local).
-					Truncate(24 * time.Hour).
-					Add(24*time.Hour - time.Nanosecond)
-
-				tx = tx.Where("created_at <= ?", endOfDay)
-			}
-		}
-
-		return tx
+		return tx.Scopes(
+			SearchScope([]string{"id", "name", "category"}, query.SearchQuery),
+			DateRangeScope("created_at", query.StartDate, query.EndDate),
+		)
 	}
 }
 
 func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx *gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
 		tx = tx.Joins("LEFT JOIN items AS item ON item.id = stock_tracks.item_id")
-
-		if searchQuery := query.SearchQuery; searchQuery != "" && len(searchQuery) > 0 {
-			searchPattern := "%" + searchQuery + "%"
-			tx = tx.Where(
-				tx.Where("stock_tracks.item_id ILIKE ?", searchPattern).
-					Or("item.name ILIKE ?", searchPattern).
-					Or("item.category ILIKE ?", searchPattern).
-					Or("stock_tracks.supplier ILIKE ?", searchPattern),
-			)
-		}
+		tx = tx.Scopes(
+			SearchScope(
+				[]string{"stock_tracks.item_id", "item.name", "item.category", "stock_tracks.supplier"},
+				query.SearchQuery,
+			),
+			DateRangeScope("stock_tracks.created_at", query.StartDate, query.EndDate),
+		)
 
 		if slices.Contains([]string{"IN", "OUT"}, query.Type) {
 			tx = tx.Where("stock_tracks.type = ?", query.Type)
-		}
-
-		if query.StartDate != "" {
-			parsedStart, err := time.Parse(time.RFC3339, query.StartDate)
-			if err == nil {
-				startOfDay := parsedStart.
-					In(time.Local).
-					Truncate(24 * time.Hour)
-
-				tx = tx.Where("stock_tracks.created_at >= ?", startOfDay)
-			}
-		}
-
-		if query.EndDate != "" {
-			parsedEnd, err := time.Parse(time.RFC3339, query.EndDate)
-			if err == nil {
-				endOfDay := parsedEnd.
-					In(time.Local).
-					Truncate(24 * time.Hour).
-					Add(24*time.Hour - time.Nanosecond)
-
-				tx = tx.Where("stock_tracks.created_at <= ?", endOfDay)
-			}
 		}
 
 		return tx

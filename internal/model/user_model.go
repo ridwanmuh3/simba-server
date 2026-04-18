@@ -21,14 +21,14 @@ type UsersStatsResponse struct {
 
 type CreateUserRequest struct {
 	Username string `json:"username" validate:"required,alphanum,min=5,max=30"`
-	Fullname string `json:"fullname" validate:"required,alphaspace,min=2,max=50"`
+	Fullname string `json:"fullname" validate:"required,printascii,min=2,max=50"`
 	Role     string `json:"role" validate:"required,userrole,min=4,max=20"`
 	Password string `json:"password" validate:"required,printascii,min=4,max=30"`
 }
 
 type UpdateUserRequest struct {
 	ID       int    `json:"-" validate:"required,numeric,min=0"`
-	Fullname string `json:"fullname,omitempty" validate:"omitempty,alphaspace,min=2,max=50"`
+	Fullname string `json:"fullname,omitempty" validate:"omitempty,printascii,min=2,max=50"`
 	Password string `json:"old_password,omitempty" validate:"omitempty,printascii,min=4,max=30"`
 }
 

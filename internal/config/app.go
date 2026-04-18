@@ -30,18 +30,25 @@ func Bootstrap(config *BootstrapConfig) {
 	// repositories
 	userRepository := repository.NewUserRepository()
 	itemRepository := repository.NewItemRepository()
+	financeRepository := repository.NewFinanceRepository()
+	dashboardRepository := repository.NewDashboardRepository()
+	settingRepository := repository.NewSettingRepository()
 
 	// services
 	userService := service.NewUserService(config.DB, config.Log, config.Validate, userRepository)
 	itemService := service.NewItemService(config.DB, config.Log, config.Validate, itemRepository)
-	financeService := service.NewFinanceService(config.DB, config.Log, config.Validate)
-	dashboardService := service.NewDashboardService(config.DB, config.Log, config.Validate)
+	stockService := service.NewStockService(config.DB, config.Log, config.Validate, itemRepository)
+	invoiceService := service.NewInvoiceService(config.DB, config.Log, config.Validate)
+	financeService := service.NewFinanceService(config.DB, config.Log, config.Validate, financeRepository)
+	dashboardService := service.NewDashboardService(config.DB, config.Log, config.Validate, dashboardRepository)
+	settingService := service.NewSettingService(config.DB, settingRepository, config.Log, config.Validate)
 
 	// handler
 	userHandler := handler.NewUserHandler(config.Config, config.Log, userService)
-	itemHandler := handler.NewItemHandler(config.Config, config.Log, config.Validate, itemService)
+	itemHandler := handler.NewItemHandler(config.Config, config.Log, config.Validate, itemService, stockService, invoiceService, settingService)
 	financeHandler := handler.NewFinanceHandler(config.Config, config.Log, financeService)
 	dashboardHandler := handler.NewDashboardHandler(config.Config, config.Log, dashboardService)
+	settingHandler := handler.NewSettingHandler(config.Config, config.Log, config.Validate, settingService)
 
 	authMiddleware := middleware.NewAuthMiddleware(config.Log, userService)
 
@@ -51,6 +58,7 @@ func Bootstrap(config *BootstrapConfig) {
 		ItemHandler:      itemHandler,
 		FinanceHandler:   financeHandler,
 		DashboardHandler: dashboardHandler,
+		SettingHandler:   settingHandler,
 		AuthMiddleware:   authMiddleware,
 		Log:              config.Log,
 	}

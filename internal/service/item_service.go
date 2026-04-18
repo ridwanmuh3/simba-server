@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -25,10 +23,20 @@ type ItemService struct {
 	db             *gorm.DB
 	log            *zap.SugaredLogger
 	validate       *validator.Validate
-	itemRepository *repository.ItemRepository
+	itemRepository ItemRepository
 }
 
-func NewItemService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, itemRepository *repository.ItemRepository) *ItemService {
+type ItemRepository interface {
+	Save(db *gorm.DB, entity *entity.Item) error
+	Update(db *gorm.DB, entity *entity.Item, id any) error
+	FindById(db *gorm.DB, entity *entity.Item, id any) error
+	FindAll(db *gorm.DB, query *model.FindAllItemsRequest) ([]entity.Item, int64, error)
+	AddBatches(db *gorm.DB, items []entity.Item) error
+}
+
+var _ ItemRepository = (*repository.ItemRepository)(nil)
+
+func NewItemService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, itemRepository ItemRepository) *ItemService {
 	return &ItemService{
 		db:             db,
 		log:            logger,
@@ -46,19 +54,8 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 		return nil, err
 	}
 
-	count, err := s.itemRepository.CountByName(tx, request.Name)
-	if err != nil {
-		s.log.Errorf("failed to count item by name: %v", err)
-		return nil, exception.InternalServerError
-	}
-
-	if count > 0 {
-		s.log.Errorf("item already exists")
-		return nil, exception.ItemAlreadyExistsError
-	}
-
 	var lastItem entity.Item
-	err = tx.WithContext(ctx).Unscoped().Order("id DESC").First(&lastItem).Error
+	err := tx.WithContext(ctx).Unscoped().Order("id DESC").First(&lastItem).Error
 
 	currentNumber := 0
 	if err == nil {
@@ -71,16 +68,20 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 	currentNumber++
 	newID := fmt.Sprintf("MBG-BHN-%04d", currentNumber)
 
+	stock := util.Round4(request.Stock)
 	item := &entity.Item{
 		ID:           newID,
 		Name:         request.Name,
 		Category:     request.Category,
-		InitialStock: request.Stock,
-		Stock:        request.Stock,
+		InitialStock: stock,
+		Stock:        stock,
 		UnitPrice:    request.UnitPrice,
 		MeasureUnit:  request.MeasureUnit,
-		TotalPrice:   request.UnitPrice * float64(request.Stock),
+		TotalPrice:   util.GetTotalPrice(stock, request.UnitPrice),
 		ModifiedBy:   request.ModifiedBy,
+	}
+	if request.DateAdded != nil {
+		item.CreatedAt = *request.DateAdded
 	}
 
 	if err := s.itemRepository.Save(tx, item); err != nil {
@@ -91,7 +92,7 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 	if err := tx.Create(&entity.ActivityLog{
 		Type:        "ADD-ITEM",
 		Title:       "Bahan baru ditambahkan",
-		Description: fmt.Sprintf("%s - %d %s", item.Name, item.InitialStock, item.MeasureUnit),
+		Description: fmt.Sprintf("%s - %g %s", item.Name, item.InitialStock, item.MeasureUnit),
 		ActionBy:    request.ModifiedBy,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
@@ -135,7 +136,6 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 
 	for _, reqItem := range request.Items {
 		currentNumber++
-
 		newID := fmt.Sprintf("MBG-BHN-%04d", currentNumber)
 
 		item := entity.Item{
@@ -146,7 +146,7 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 			InitialStock: reqItem.Stock,
 			MeasureUnit:  reqItem.MeasureUnit,
 			UnitPrice:    reqItem.UnitPrice,
-			TotalPrice:   reqItem.UnitPrice * float64(reqItem.Stock),
+			TotalPrice:   util.GetTotalPrice(reqItem.Stock, reqItem.UnitPrice),
 			ModifiedBy:   reqItem.ModifiedBy,
 		}
 		items = append(items, item)
@@ -196,96 +196,80 @@ func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemReque
 	item.Name = request.Name
 	item.Category = request.Category
 	item.MeasureUnit = request.MeasureUnit
-	item.UnitPrice = request.UnitPrice
-	item.TotalPrice = request.UnitPrice * float64(item.Stock)
 	item.ModifiedBy = request.ModifiedBy
 
-	if err := s.itemRepository.Update(tx, item, item.ID); err != nil {
-		s.log.Errorf("failed to update item to database: %v", err)
+	if request.DateAdded != nil {
+		item.CreatedAt = *request.DateAdded
+	}
+
+	// Allow correcting initial stock entry errors and sync running stock / tracks.
+	if request.InitialStock != nil {
+		item.InitialStock = util.Round4(*request.InitialStock)
+	}
+
+	var stockTracks []entity.StockTracking
+	if err := tx.Where("item_id = ?", item.ID).
+		Order("created_at ASC").
+		Find(&stockTracks).Error; err != nil {
+		s.log.Errorf("failed to fetch stock tracking records: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	runningStock := item.InitialStock
+	totalPrice := util.Round2(item.InitialStock * request.UnitPrice)
+
+	for i := range stockTracks {
+		prevStock := runningStock
+		stockTracks[i].PreviousStock = util.Round4(prevStock)
+
+		switch stockTracks[i].Type {
+		case "IN":
+			runningStock = util.Round4(runningStock + stockTracks[i].Amount)
+			totalPrice = util.Round2(totalPrice + stockTracks[i].Amount*stockTracks[i].UnitPrice)
+		case "OUT":
+			if prevStock <= 0 {
+				s.log.Errorf("invalid state: stock below zero")
+				return nil, exception.InternalServerError
+			}
+
+			avg := totalPrice / prevStock
+			deduction := util.Round2(avg * stockTracks[i].Amount)
+			runningStock = util.Round4(runningStock - stockTracks[i].Amount)
+			totalPrice = util.Round2(totalPrice - deduction)
+		}
+
+		stockTracks[i].NewStock = util.Round4(runningStock)
+	}
+
+	for i := range stockTracks {
+		if err := tx.Model(&entity.StockTracking{}).
+			Where("id = ?", stockTracks[i].ID).
+			Updates(map[string]any{
+				"previous_stock": stockTracks[i].PreviousStock,
+				"new_stock":      stockTracks[i].NewStock,
+			}).Error; err != nil {
+			s.log.Errorf("failed to update stock tracking id=%d: %v", stockTracks[i].ID, err)
+			return nil, exception.InternalServerError
+		}
+	}
+
+	item.Stock = util.Round4(runningStock)
+	item.TotalPrice = util.Round2(totalPrice)
+	item.UnitPrice = request.UnitPrice
+
+	if err := tx.Model(item).
+		Select("Name", "Category", "MeasureUnit", "Stock", "InitialStock", "UnitPrice", "TotalPrice", "ModifiedBy", "CreatedAt").
+		Updates(item).Error; err != nil {
+		s.log.Errorf("failed to update item: %v", err)
 		return nil, exception.InternalServerError
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
+		s.log.Errorf("failed to commit transaction: %v", err)
 		return nil, exception.InternalServerError
 	}
 
 	return converter.ItemToResponse(item), nil
-}
-
-func (s *ItemService) UpdateStock(ctx context.Context, request *model.UpdateItemStockRequest) (*model.StockResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
-
-	if err := s.validate.Struct(request); err != nil {
-		s.log.Errorf("failed to validate request body: %v", err)
-		return nil, err
-	}
-
-	item := new(entity.Item)
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(item, "id = ?", request.ID).Error; err != nil {
-		s.log.Errorf("failed to find item by code: %v", err)
-		return nil, exception.ItemNotFoundError
-	}
-
-	if request.Supplier == "" {
-		request.Supplier = "-"
-	}
-
-	stockTracking := new(entity.StockTracking)
-	stockTracking.ItemID = item.ID
-	stockTracking.Type = request.Type
-	stockTracking.ModifiedBy = request.ModifiedBy
-	stockTracking.PreviousStock = item.Stock
-	stockTracking.Amount = request.Amount
-	stockTracking.UnitPrice = request.UnitPrice
-	stockTracking.Supplier = request.Supplier
-
-	switch request.Type {
-	case "IN":
-		stockTracking.NewStock = stockTracking.PreviousStock + request.Amount
-	case "OUT":
-		if stockTracking.PreviousStock < request.Amount {
-			s.log.Errorf("failed to decrease item stock: insufficient stock")
-			return nil, fiber.NewError(fiber.StatusBadRequest, "stock must be sufficient enough to decreased")
-		}
-		stockTracking.NewStock = stockTracking.PreviousStock - request.Amount
-	default:
-		s.log.Errorf("invalid stock type '%s'", request.Type)
-		return nil, fiber.NewError(fiber.StatusBadRequest, "invalid update stock type")
-	}
-
-	stockTracking.TotalPrice = request.UnitPrice * float64(request.Amount)
-	item.Stock = stockTracking.NewStock
-	item.TotalPrice = float64(item.Stock) * item.UnitPrice
-
-	if err := s.itemRepository.Update(tx, item, item.ID); err != nil {
-		s.log.Errorf("failed to update item stock to database: %v", err)
-		return nil, exception.InternalServerError
-	}
-
-	if err := tx.Create(stockTracking).Error; err != nil {
-		s.log.Errorf("failed to create stock tracking to database: %v", err)
-		return nil, exception.InternalServerError
-	}
-
-	if err := tx.Create(&entity.ActivityLog{
-		Type:        "UPDATE-STOCK",
-		Title:       "Stok bahan diperbarui",
-		Description: fmt.Sprintf("%s - %d %s", item.Name, item.Stock, item.MeasureUnit),
-		ActionBy:    request.ModifiedBy,
-	}).Error; err != nil {
-		s.log.Errorf("failed to save activity log to database: %v", err)
-		return nil, exception.InternalServerError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
-		return nil, exception.InternalServerError
-	}
-
-	return converter.StockToResponse(stockTracking), nil
 }
 
 func (s *ItemService) Delete(ctx context.Context, request *model.DeleteItemRequest) (bool, error) {
@@ -293,94 +277,38 @@ func (s *ItemService) Delete(ctx context.Context, request *model.DeleteItemReque
 	defer tx.Rollback()
 
 	if err := s.validate.Struct(request); err != nil {
-		s.log.Errorf("failed to validate request body: %v", err)
 		return false, err
 	}
 
 	item := new(entity.Item)
-	if err := s.itemRepository.FindById(tx, item, request.ID); err != nil {
-		s.log.Errorf("failed to find item by id: %v", err)
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", request.ID).
+		First(item).Error; err != nil {
 		return false, exception.ItemNotFoundError
 	}
 
-	if err := s.itemRepository.Delete(tx, item); err != nil {
-		s.log.Errorf("failed to delete item by id: %v", err)
+	if err := tx.
+		Unscoped().
+		Where("item_id = ?", item.ID).
+		Delete(&entity.StockTracking{}).Error; err != nil {
+		return false, exception.InternalServerError
+	}
+
+	if err := tx.Unscoped().Delete(item).Error; err != nil {
 		return false, exception.InternalServerError
 	}
 
 	if err := tx.Create(&entity.ActivityLog{
 		Type:        "DELETE-ITEM",
-		Title:       "Data bahan dihapus",
+		Title:       "Data bahan dihapus permanen",
 		Description: item.Name,
-		ActionBy:    item.ModifiedBy,
+		ActionBy:    request.ID,
 	}).Error; err != nil {
-		s.log.Errorf("failed to save activity log to database: %v", err)
 		return false, exception.InternalServerError
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
-		return false, exception.InternalServerError
-	}
-
-	return true, nil
-}
-
-func (s *ItemService) DeleteStock(ctx context.Context, request *model.DeleteStockRequest) (bool, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
-
-	if err := s.validate.Struct(request); err != nil {
-		s.log.Errorf("failed to validate request body: %v", err)
-		return false, err
-	}
-
-	item := new(entity.Item)
-	if err := s.itemRepository.FindById(tx, item, request.ID); err != nil {
-		s.log.Errorf("failed to find item by id: %v", err)
-		return false, exception.ItemNotFoundError
-	}
-
-	stock := new(entity.StockTracking)
-	if err := tx.Where("id = ? AND item_id = ?", request.StockID, request.ID).First(stock).Error; err != nil {
-		s.log.Errorf("failed to find stock item by id: %v", err)
-		return false, exception.ItemNotFoundError
-	}
-
-	switch stock.Type {
-	case "IN":
-		item.Stock = item.Stock - stock.Amount
-	case "OUT":
-		item.Stock = item.Stock + stock.Amount
-	}
-
-	if item.Stock < 0 {
-		s.log.Errorf("deletion resulted in negative stock")
-		return false, fiber.NewError(fiber.StatusBadRequest, "reducing this stock item will resulting negative stock")
-	}
-
-	if err := tx.Where("id = ? AND item_id = ?", request.StockID, item.ID).Delete(stock).Error; err != nil {
-		s.log.Errorf("failed to delete stock item by id: %v", err)
-		return false, exception.InternalServerError
-	}
-
-	if err := s.itemRepository.Save(tx, item); err != nil {
-		s.log.Errorf("failed to save stock item: %v", err)
-		return false, exception.InternalServerError
-	}
-
-	if err := tx.Create(&entity.ActivityLog{
-		Type:        "REDUCE-STOCK",
-		Title:       "Data stock bahan diperbarui",
-		Description: fmt.Sprintf("%s - %d %s", item.Name, item.Stock, item.MeasureUnit),
-		ActionBy:    item.ModifiedBy,
-	}).Error; err != nil {
-		s.log.Errorf("failed to save activity log to database: %v", err)
-		return false, exception.InternalServerError
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit database transaction: %v", err)
 		return false, exception.InternalServerError
 	}
 
@@ -426,69 +354,11 @@ func (s *ItemService) FindAll(ctx context.Context, request *model.FindAllItemsRe
 	return responses, total, nil
 }
 
-func (s *ItemService) FindAllStocks(ctx context.Context, request *model.FindAllStocksRequest) ([]model.StockResponse, int64, error) {
-	db := s.db.WithContext(ctx)
-
-	stocksTracking, total, err := s.itemRepository.FindAllStocks(db, request)
-	if err != nil {
-		s.log.Errorf("failed to find all items stocks: %v", err)
-		return nil, 0, exception.InternalServerError
-	}
-
-	responses := make([]model.StockResponse, len(stocksTracking))
-	for i, stock := range stocksTracking {
-		responses[i] = *converter.StockToResponse(&stock)
-	}
-
-	return responses, total, nil
-}
-
-func (s *ItemService) GetStocksFinanceSummary(ctx context.Context) (*model.StocksFinanceSummaryResponse, error) {
-	db := s.db.WithContext(ctx)
-
-	var (
-		masterItemsTotalBudget,
-		budgetIn,
-		budgetOut,
-		profit,
-		currentBudget float64
-	)
-
-	db.
-		Model(new(entity.Item)).
-		Select("COALESCE(SUM(total_price),0)").
-		Scan(&masterItemsTotalBudget)
-
-	db.
-		Model(new(entity.StockTracking)).
-		Select("COALESCE(SUM(amount * unit_price),0)").
-		Where("type = ?", "IN").
-		Scan(&budgetIn)
-
-	db.
-		Model(new(entity.StockTracking)).
-		Select("COALESCE(SUM(amount * unit_price),0)").
-		Where("type = ?", "OUT").
-		Scan(&budgetOut)
-
-	profit = budgetOut - budgetIn
-	currentBudget = masterItemsTotalBudget + profit
-
-	return &model.StocksFinanceSummaryResponse{
-		MasterItemsTotalBudget: masterItemsTotalBudget,
-		BudgetIn:               budgetIn,
-		BudgetOut:              budgetOut,
-		Profit:                 profit,
-		CurrentBudget:          currentBudget,
-	}, nil
-}
-
 func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, int, error) {
 	db := s.db.WithContext(ctx)
 
 	var items []entity.Item
-	err := db.Model(new(entity.Item)).Order("created_at DESC").Find(&items).Error
-	if err != nil {
+	if err := db.Model(new(entity.Item)).Order("created_at DESC").Find(&items).Error; err != nil {
 		s.log.Errorf("failed to export all items: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
@@ -499,94 +369,4 @@ func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, in
 	}
 
 	return responses, len(responses), nil
-}
-
-func (s *ItemService) GetInvoiceItems(ctx context.Context, request *model.GetInvoiceItemsRequest) ([]model.StockResponse, error) {
-	db := s.db.WithContext(ctx)
-
-	if err := s.validate.Struct(request); err != nil {
-		s.log.Errorf("failed to validate request body: %v", err)
-		return nil, err
-	}
-
-	var stocks []entity.StockTracking
-	query := db.Model(new(entity.StockTracking)).Preload("Item").Where("type = ?", "OUT")
-
-	if request.DateFrom != "" {
-		parsedFrom, err := time.Parse(time.RFC3339Nano, request.DateFrom)
-		if err != nil {
-			s.log.Errorf("failed to parse date from: %v", err)
-			return nil, exception.InternalServerError
-		}
-		query = query.Where("created_at >= ?", parsedFrom.UTC())
-	}
-
-	if request.DateTo != "" {
-		parsedTo, err := time.Parse(time.RFC3339Nano, request.DateTo)
-		if err != nil {
-			s.log.Errorf("failed to parse date to: %v", err)
-			return nil, exception.InternalServerError
-		}
-		query = query.Where("created_at < ?", parsedTo.UTC().Add(24*time.Hour))
-	}
-
-	if err := query.Order("item_id ASC").Limit(500).Find(&stocks).Error; err != nil {
-		s.log.Errorf("failed to get invoice items: %v", err)
-		return nil, exception.InternalServerError
-	}
-
-	responses := make([]model.StockResponse, len(stocks))
-	for i, stock := range stocks {
-		responses[i] = *converter.StockToResponse(&stock)
-	}
-
-	return responses, nil
-}
-
-func (s *ItemService) GetItemStocksSummary(ctx context.Context, request *model.GetItemStockSummaryRequest) ([]model.ItemStocksSummaryResponse, int64, error) {
-	db := s.db.WithContext(ctx)
-
-	if err := s.validate.Struct(request); err != nil {
-		s.log.Errorf("failed to validate request body: %v", err)
-		return nil, 0, err
-	}
-
-	var responses []model.ItemStocksSummaryResponse
-	var total int64
-	offset := (request.Page - 1) * request.Size
-
-	err := db.Table("items").
-		Joins("JOIN stock_tracks st ON st.item_id = items.id").
-		Distinct("items.id").
-		Count(&total).Error
-	if err != nil {
-		return nil, 0, err
-	}
-
-	err = db.Table("items").
-		Select(`
-			items.id AS item_id,
-			items.name AS name,
-			items.category AS category,
-			items.measure_unit AS measure_unit,
-			items.stock AS current_stock,
-			(items.stock * items.unit_price) AS stock_value,
-			COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0) AS total_in,
-			COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0) AS total_out,
-			(items.stock
-			 - COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0)
-			 + COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0)) AS initial_stock
-		`).
-		Joins("JOIN stock_tracks st ON st.item_id = items.id").
-		Group("items.id, items.name, items.category, items.measure_unit, items.stock, items.unit_price").
-		Order("items.updated_at DESC").
-		Limit(request.Size).
-		Offset(offset).
-		Find(&responses).Error
-
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return responses, total, nil
 }

@@ -7,10 +7,15 @@ type TokenResponse struct {
 }
 
 type Auth struct {
-	ID       int    `json:"id"`
-	Fullname string `json:"fullname"`
-	Role     string `json:"role"`
-	Token    string `json:"-"`
+	ID           int    `json:"id"`
+	Fullname     string `json:"fullname"`
+	Role         string `json:"role"`
+	Token        string `json:"-"`
+	RefreshToken string `json:"-"`
+}
+
+type RefreshSessionRequest struct {
+	RefreshToken string `validate:"required,max=255"`
 }
 
 type LoginUserRequest struct {

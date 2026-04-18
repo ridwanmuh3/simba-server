@@ -54,14 +54,12 @@ func (h *FinanceHandler) Add(c *fiber.Ctx) error {
 	request.Amount = amount
 	request.ExtraNote = extraNote
 
-	// 1. Ambil file
 	proofImg, err := c.FormFile("proof_image")
 	if err != nil {
 		h.log.Warnf("failed to get uploaded file: %v", err)
 		return exception.InvalidUploadedFileError
 	}
 
-	// 2. Validasi ekstensi
 	ext := strings.ToLower(filepath.Ext(proofImg.Filename))
 	allowedExt := []string{".png", ".jpg", ".jpeg"}
 
@@ -70,7 +68,7 @@ func (h *FinanceHandler) Add(c *fiber.Ctx) error {
 		return exception.InvalidFileFormatError
 	}
 
-	const maxFileSize = int64(10 * 1024 * 1024)
+	const maxFileSize = int64(15 * 1024 * 1024)
 	if proofImg.Size > maxFileSize {
 		h.log.Warnf("file size exceeded: %d bytes", proofImg.Size)
 		return exception.ExceedMaximumFileSizeError
@@ -142,7 +140,7 @@ func (h *FinanceHandler) Update(c *fiber.Ctx) error {
 			return exception.InvalidFileFormatError
 		}
 
-		const maxFileSize = int64(10 * 1024 * 1024)
+		const maxFileSize = int64(15 * 1024 * 1024)
 		if proofImg.Size > maxFileSize {
 			h.log.Warnf("file size exceeded: %d bytes", proofImg.Size)
 			return exception.ExceedMaximumFileSizeError
@@ -164,10 +162,14 @@ func (h *FinanceHandler) Update(c *fiber.Ctx) error {
 		}
 
 		if oldData.ProofImage != "" {
-			oldFilePath := "." + oldData.ProofImage
-			if _, err := os.Stat(oldFilePath); err == nil {
-				if err := os.Remove(oldFilePath); err != nil {
+			fileName := filepath.Base(oldData.ProofImage)
+			oldFilePath := filepath.Join("uploads", "finances-proof", fileName)
+
+			if err := os.Remove(oldFilePath); err != nil {
+				if !os.IsNotExist(err) {
 					h.log.Warnf("failed to delete old file: %v", err)
+				} else {
+					h.log.Warnf("file not found, skip delete: %s", oldFilePath)
 				}
 			}
 		}

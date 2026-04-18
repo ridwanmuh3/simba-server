@@ -26,6 +26,10 @@ func (r *UserRepository) FindByToken(db *gorm.DB, user *entity.User, token strin
 	return db.Where("token = ?", token).Take(user).Error
 }
 
+func (r *UserRepository) FindByRefreshToken(db *gorm.DB, user *entity.User, token string) error {
+	return db.Where("refresh_token = ?", token).Take(user).Error
+}
+
 func (r *UserRepository) FindByUsername(db *gorm.DB, user *entity.User, username string) error {
 	return db.Where("username = ?", username).Take(user).Error
 }

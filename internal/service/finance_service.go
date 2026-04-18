@@ -3,31 +3,43 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/go-playground/validator/v10"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/exception"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/model/converter"
+	"github.com/ridwanmuh3/simba-server/internal/repository"
 	"github.com/ridwanmuh3/simba-server/internal/util"
 )
 
 type FinanceService struct {
-	db       *gorm.DB
-	log      *zap.SugaredLogger
-	validate *validator.Validate
+	db                *gorm.DB
+	log               *zap.SugaredLogger
+	validate          *validator.Validate
+	financeRepository FinanceRepository
 }
 
-func NewFinanceService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate) *FinanceService {
+type FinanceRepository interface {
+	Save(db *gorm.DB, entity *entity.Finance) error
+	Delete(db *gorm.DB, entity *entity.Finance) error
+	FindByIdForUpdate(db *gorm.DB, id any) (*entity.Finance, error)
+	FindById(db *gorm.DB, id any) (*entity.Finance, error)
+	FindAll(db *gorm.DB, query *model.FindAllFinanceRequest) ([]entity.Finance, int64, error)
+	FindAllUnpaginated(db *gorm.DB) ([]entity.Finance, int64, error)
+}
+
+var _ FinanceRepository = (*repository.FinanceRepository)(nil)
+
+func NewFinanceService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, financeRepository FinanceRepository) *FinanceService {
 	return &FinanceService{
-		db:       db,
-		log:      logger,
-		validate: validate,
+		db:                db,
+		log:               logger,
+		validate:          validate,
+		financeRepository: financeRepository,
 	}
 }
 
@@ -40,16 +52,17 @@ func (s *FinanceService) Add(ctx context.Context, request *model.AddFinanceReque
 		return nil, err
 	}
 
-	finance := new(entity.Finance)
-	finance.Type = request.Type
-	finance.Category = request.Category
-	finance.Description = request.Description
-	finance.Amount = request.Amount
-	finance.ExtraNote = request.ExtraNote
-	finance.ProofImage = request.ProofImage
-	finance.ModifiedBy = request.ModifiedBy
+	finance := &entity.Finance{
+		Type:        request.Type,
+		Category:    request.Category,
+		Description: request.Description,
+		Amount:      request.Amount,
+		ExtraNote:   request.ExtraNote,
+		ProofImage:  request.ProofImage,
+		ModifiedBy:  request.ModifiedBy,
+	}
 
-	if err := tx.Save(finance).Error; err != nil {
+	if err := s.financeRepository.Save(tx, finance); err != nil {
 		s.log.Errorf("failed to save finance data: %v", err)
 		return nil, exception.InternalServerError
 	}
@@ -81,8 +94,8 @@ func (s *FinanceService) Update(ctx context.Context, request *model.UpdateFinanc
 		return nil, err
 	}
 
-	finance := new(entity.Finance)
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", request.ID).First(finance).Error; err != nil {
+	finance, err := s.financeRepository.FindByIdForUpdate(tx, request.ID)
+	if err != nil {
 		s.log.Errorf("failed to find finance by id: %v", err)
 		return nil, exception.FinanceNotFound
 	}
@@ -101,7 +114,7 @@ func (s *FinanceService) Update(ctx context.Context, request *model.UpdateFinanc
 		finance.ProofImage = request.ProofImage
 	}
 
-	if err := tx.Save(finance).Error; err != nil {
+	if err := s.financeRepository.Save(tx, finance); err != nil {
 		s.log.Errorf("failed to update finance data: %v", err)
 		return nil, exception.InternalServerError
 	}
@@ -123,8 +136,8 @@ func (s *FinanceService) Delete(ctx context.Context, request *model.DeleteFinanc
 		return false, err
 	}
 
-	finance := new(entity.Finance)
-	if err := tx.Where("id = ?", request.ID).First(finance).Error; err != nil {
+	finance, err := s.financeRepository.FindByIdForUpdate(tx, request.ID)
+	if err != nil {
 		s.log.Errorf("failed to find finance by id: %v", err)
 		return false, exception.FinanceNotFound
 	}
@@ -134,7 +147,7 @@ func (s *FinanceService) Delete(ctx context.Context, request *model.DeleteFinanc
 		return false, exception.InternalServerError
 	}
 
-	if err := tx.Delete(finance).Error; err != nil {
+	if err := s.financeRepository.Delete(tx, finance); err != nil {
 		s.log.Errorf("failed to delete finance data: %v", err)
 		return false, exception.InternalServerError
 	}
@@ -165,8 +178,8 @@ func (s *FinanceService) FindById(ctx context.Context, request *model.FindByIdFi
 		return nil, err
 	}
 
-	finance := new(entity.Finance)
-	if err := db.Where("id = ?", request.ID).First(finance).Error; err != nil {
+	finance, err := s.financeRepository.FindById(db, request.ID)
+	if err != nil {
 		s.log.Errorf("failed to find finance by id: %v", err)
 		return nil, exception.FinanceNotFound
 	}
@@ -184,26 +197,15 @@ func (s *FinanceService) FindAll(
 		return nil, 0, err
 	}
 
-	var total int64
-	if err := db.Model(new(entity.Finance)).
-		Scopes(s.FilterFinance(request)).
-		Count(&total).Error; err != nil {
-		return nil, 0, exception.InternalServerError
-	}
-
-	var finances []entity.Finance
-	if err := db.Scopes(s.FilterFinance(request)).
-		Offset((request.Page - 1) * request.Size).
-		Limit(request.Size).
-		Order("created_at DESC").
-		Find(&finances).Error; err != nil {
+	finances, total, err := s.financeRepository.FindAll(db, request)
+	if err != nil {
+		s.log.Errorf("failed to find all finances: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
 
 	responses := make([]model.FinanceResponse, 0, len(finances))
 	for _, finance := range finances {
-		responses = append(responses,
-			*converter.FinanceToResponse(&finance))
+		responses = append(responses, *converter.FinanceToResponse(&finance))
 	}
 
 	return responses, total, nil
@@ -212,61 +214,16 @@ func (s *FinanceService) FindAll(
 func (s *FinanceService) Export(ctx context.Context) ([]model.FinanceResponse, int64, error) {
 	db := s.db.WithContext(ctx)
 
-	var total int64
-	if err := db.Model(new(entity.Finance)).Count(&total).Error; err != nil {
-		s.log.Errorf("failed to count finance data: %v", err)
-		return nil, 0, exception.InternalServerError
-	}
-
-	var finances []entity.Finance
-	if err := db.Find(&finances).Error; err != nil {
+	finances, total, err := s.financeRepository.FindAllUnpaginated(db)
+	if err != nil {
 		s.log.Errorf("failed to find all finances data: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
 
-	responses := make([]model.FinanceResponse, total)
+	responses := make([]model.FinanceResponse, len(finances))
 	for i, finance := range finances {
 		responses[i] = *converter.FinanceToResponse(&finance)
 	}
 
 	return responses, total, nil
-}
-
-func (s *FinanceService) FilterFinance(query *model.FindAllFinanceRequest) func(tx *gorm.DB) *gorm.DB {
-	return func(tx *gorm.DB) *gorm.DB {
-		if searchQuery := query.SearchQuery; searchQuery != "" && len(searchQuery) > 0 {
-			searchPattern := "%" + searchQuery + "%"
-			tx = tx.Where(
-				tx.Where("category ILIKE ?", searchPattern).
-					Or("description ILIKE ?", searchPattern).
-					Or("extra_note ILIKE ?", searchPattern).
-					Or("type ILIKE ?", searchPattern),
-			)
-		}
-
-		if query.StartDate != "" {
-			parsedStart, err := time.Parse(time.RFC3339, query.StartDate)
-			if err == nil {
-				startOfDay := parsedStart.
-					In(time.Local).
-					Truncate(24 * time.Hour)
-
-				tx = tx.Where("created_at >= ?", startOfDay)
-			}
-		}
-
-		if query.EndDate != "" {
-			parsedEnd, err := time.Parse(time.RFC3339, query.EndDate)
-			if err == nil {
-				endOfDay := parsedEnd.
-					In(time.Local).
-					Truncate(24 * time.Hour).
-					Add(24*time.Hour - time.Nanosecond)
-
-				tx = tx.Where("created_at <= ?", endOfDay)
-			}
-		}
-
-		return tx
-	}
 }
