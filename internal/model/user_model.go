@@ -41,6 +41,11 @@ type FindByIdUserRequest struct {
 	ID int `json:"id" validate:"required,numeric"`
 }
 
+type ResetPasswordRequest struct {
+	Username    string `json:"username"`
+	NewPassword string `json:"new_password"`
+}
+
 type FindAllUserRequest struct {
 	Fullname string `query:"fullname,omitempty" validate:"omitempty,max=30"`
 	Page     int    `query:"page,omitempty" validate:"omitempty,min=1"`

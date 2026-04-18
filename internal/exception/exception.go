@@ -28,9 +28,11 @@ func NewErrorHandler() fiber.ErrorHandler {
 		}
 
 		if validationErrors, ok := err.(validator.ValidationErrors); ok {
+			var msgs []string
 			for _, validationError := range validationErrors {
-				errors = append(validationErrors, validationError)
+				msgs = append(msgs, validationError.Error())
 			}
+			errors = msgs
 			code = fiber.StatusBadRequest
 		}
 

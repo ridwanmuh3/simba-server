@@ -44,8 +44,8 @@ func NewDB(viper *viper.Viper, log *zap.SugaredLogger) *gorm.DB {
 		log.Fatalf("failed to connect database: %v", err)
 	}
 
-	conn.SetMaxOpenConns(dbPoolIdle)
-	conn.SetMaxIdleConns(dbMaxPool)
+	conn.SetMaxOpenConns(dbMaxPool)
+	conn.SetMaxIdleConns(dbPoolIdle)
 	conn.SetConnMaxLifetime(dbMaxLifetime)
 
 	return db

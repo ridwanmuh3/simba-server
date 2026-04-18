@@ -218,6 +218,41 @@ func (s *UserService) FindAll(ctx context.Context, request *model.FindAllUserReq
 	return responses, total, nil
 }
 
+func (s *UserService) ResetPassword(ctx context.Context, request *model.ResetPasswordRequest) error {
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+
+	user := new(entity.User)
+	if err := s.userRepository.FindByUsername(tx, user, request.Username); err != nil {
+		s.log.Warnf("reset-password: user not found: %s", request.Username)
+		return exception.UserNotFoundError
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(request.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		s.log.Errorf("reset-password: failed to hash password: %v", err)
+		return exception.InternalServerError
+	}
+
+	user.Password = string(hash)
+	user.Token = ""
+	user.RefreshToken = ""
+	user.IsActive = false
+
+	if err := s.userRepository.Save(tx, user); err != nil {
+		s.log.Errorf("reset-password: failed to save user: %v", err)
+		return exception.InternalServerError
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		s.log.Errorf("reset-password: failed to commit: %v", err)
+		return exception.InternalServerError
+	}
+
+	s.log.Infof("reset-password: password reset for user %s", request.Username)
+	return nil
+}
+
 func (s *UserService) GetUsersStats(ctx context.Context) (*model.UsersStatsResponse, error) {
 	db := s.db.WithContext(ctx)
 

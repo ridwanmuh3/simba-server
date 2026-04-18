@@ -26,7 +26,7 @@ func (r *DashboardRepository) SumStockByType(db *gorm.DB, stockType string) (flo
 	var total float64
 	err := db.Model(new(entity.StockTracking)).
 		Select("COALESCE(SUM(amount),0)").
-		Where("type = ? AND deleted_at IS NULL", stockType).
+		Where("type = ? AND deleted_at IS NULL AND created_at >= NOW() - INTERVAL '1 year'", stockType).
 		Scan(&total).Error
 	return total, err
 }
@@ -37,14 +37,14 @@ func (r *DashboardRepository) GetFinanceSummary(db *gorm.DB) (int64, int64, erro
 
 	if err := db.Model(new(entity.Finance)).
 		Select("COALESCE(SUM(amount),0)").
-		Where("type = ? AND deleted_at IS NULL", "PEMASUKAN").
+		Where("type = ? AND deleted_at IS NULL AND created_at >= NOW() - INTERVAL '1 year'", "PEMASUKAN").
 		Scan(&budgetIn).Error; err != nil {
 		return 0, 0, err
 	}
 
 	if err := db.Model(new(entity.Finance)).
 		Select("COALESCE(SUM(amount),0)").
-		Where("type = ? AND deleted_at IS NULL", "PENGELUARAN").
+		Where("type = ? AND deleted_at IS NULL AND created_at >= NOW() - INTERVAL '1 year'", "PENGELUARAN").
 		Scan(&budgetOut).Error; err != nil {
 		return 0, 0, err
 	}
@@ -61,7 +61,7 @@ func (r *DashboardRepository) GetMonthlyStats(db *gorm.DB) ([]model.MonthlyBudge
 			SUM(CASE WHEN type='PEMASUKAN' THEN amount ELSE 0 END) AS "in",
 			SUM(CASE WHEN type='PENGELUARAN' THEN amount ELSE 0 END) AS "out"
 		`).
-		Where("deleted_at IS NULL").
+		Where("deleted_at IS NULL AND created_at >= NOW() - INTERVAL '1 year'").
 		Group("DATE_TRUNC('month', created_at)").
 		Order("DATE_TRUNC('month', created_at) ASC").
 		Scan(&stats).Error
@@ -77,7 +77,7 @@ func (r *DashboardRepository) GetExpenseComposition(db *gorm.DB) ([]model.Expens
 	err := db.
 		Table("finances").
 		Select("category, SUM(amount) as amount").
-		Where("type = ? AND deleted_at IS NULL", "PENGELUARAN").
+		Where("type = ? AND deleted_at IS NULL AND created_at >= NOW() - INTERVAL '1 year'", "PENGELUARAN").
 		Group("category").
 		Scan(&composition).Error
 	return composition, err

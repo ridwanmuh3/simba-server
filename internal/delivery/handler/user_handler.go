@@ -153,6 +153,38 @@ func (h *UserHandler) FindAll(c *fiber.Ctx) error {
 	})
 }
 
+func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
+	secret := h.config.GetString("APP_RESET_SECRET")
+	if secret == "" || c.Get("X-Reset-Secret") != secret {
+		h.log.Warnf("reset-password: invalid or missing secret")
+		return fiber.ErrUnauthorized
+	}
+
+	request := new(model.ResetPasswordRequest)
+	if err := c.BodyParser(request); err != nil {
+		h.log.Warnf("reset-password: failed to parse body: %v", err)
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+
+	if request.Username == "" || request.NewPassword == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "username and new_password required")
+	}
+
+	if len(request.NewPassword) < 4 {
+		return fiber.NewError(fiber.StatusBadRequest, "new_password min 4 characters")
+	}
+
+	if err := h.userService.ResetPassword(c.Context(), request); err != nil {
+		h.log.Warnf("reset-password: failed: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[any]{
+		Status:  fiber.StatusOK,
+		Message: "password reset success, user session invalidated",
+	})
+}
+
 func (h *UserHandler) GetUsersStats(c *fiber.Ctx) error {
 	response, err := h.userService.GetUsersStats(c.Context())
 	if err != nil {

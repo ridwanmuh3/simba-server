@@ -206,12 +206,15 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "File CSV tidak berisi data barang")
 	}
 
-	if len(items) > 0 {
-		err = h.itemService.AddBatches(c.Context(), &model.AddItemBatchRequest{Items: items})
-		if err != nil {
-			h.log.Warnf("failed to bulk insert items: %v", err)
-			return exception.InternalServerError
-		}
+	const maxCSVRows = 500
+	if len(items) > maxCSVRows {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Jumlah baris melebihi batas maksimum %d baris", maxCSVRows))
+	}
+
+	err = h.itemService.AddBatches(c.Context(), &model.AddItemBatchRequest{Items: items})
+	if err != nil {
+		h.log.Warnf("failed to bulk insert items: %v", err)
+		return exception.InternalServerError
 	}
 
 	return c.JSON(model.Response[int]{

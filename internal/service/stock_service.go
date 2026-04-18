@@ -124,7 +124,7 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		avg := util.Round4(currentTotalPrice / previousStock)
 
 		newStock := util.Round4(previousStock - request.Amount)
-		deduction := util.Round2(avg * request.Amount)               // MAC (inventory)
+		deduction := util.Round2(avg * request.Amount)                        // MAC (inventory)
 		lineTotal := util.Round2(request.Amount * request.UnitPrice) // invoice
 
 		item.Stock = newStock
@@ -245,7 +245,7 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 			runningStock = util.Round4(prev + tracks[i].Amount)
 			totalPrice = util.Round2(totalPrice + added)
 
-			tracks[i].TotalPrice = added
+			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
 
 		case "OUT":
 			if prev < tracks[i].Amount {
@@ -385,7 +385,7 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 			runningStock = util.Round4(prev + tracks[i].Amount)
 			totalPrice = util.Round2(totalPrice + added)
 
-			tracks[i].TotalPrice = added
+			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
 
 		case "OUT":
 			if prev < tracks[i].Amount {

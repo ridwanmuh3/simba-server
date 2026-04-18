@@ -145,6 +145,7 @@ func main() {
 			newStock := util.Round4(item.Stock + ss.Amount)
 			addedTotal := util.Round2(ss.Amount * ss.UnitPrice)
 			st.NewStock = newStock
+			st.TotalPrice = util.Round2(ss.Amount * ss.UnitPrice)
 			item.Stock = newStock
 			item.TotalPrice = util.Round2(item.TotalPrice + addedTotal)
 		case "OUT":
