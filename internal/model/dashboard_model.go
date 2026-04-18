@@ -4,8 +4,8 @@ import "time"
 
 type DashboardStatsResponse struct {
 	TotalItems int64 `json:"total_items"`
-	StockIn    int64 `json:"stock_in"`
-	StockOut   int64 `json:"stock_out"`
+	StockIn    float64 `json:"stock_in"`
+	StockOut   float64 `json:"stock_out"`
 
 	TotalBudget int64 `json:"total_budget"`
 	BudgetIn    int64 `json:"budget_in"`

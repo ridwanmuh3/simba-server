@@ -20,6 +20,7 @@ func main() {
 		&entity.ActivityLog{},
 		&entity.AppSetting{},
 		&entity.Invoice{},
+		&entity.InvoiceItem{},
 	); err != nil {
 		log.Fatalf("migration failed: %v", err)
 	}

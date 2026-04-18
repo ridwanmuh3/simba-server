@@ -45,6 +45,7 @@ type ItemService interface {
 
 type StockService interface {
 	UpdateStock(ctx context.Context, request *model.UpdateItemStockRequest) (*model.StockResponse, error)
+	EditStock(ctx context.Context, request *model.EditStockRequest) (*model.StockResponse, error)
 	DeleteStock(ctx context.Context, request *model.DeleteStockRequest) (bool, error)
 	FindAllStocks(ctx context.Context, request *model.FindAllStocksRequest) ([]model.StockResponse, int64, error)
 	GetStocksFinanceSummary(ctx context.Context) (*model.StocksFinanceSummaryResponse, error)
@@ -53,8 +54,9 @@ type StockService interface {
 
 type InvoiceService interface {
 	GetInvoiceItems(ctx context.Context, request *model.GetInvoiceItemsRequest) (*model.InvoiceSummary, error)
-	SaveInvoice(ctx context.Context, request *model.GenerateInvoiceRequest) error
+	SaveInvoice(ctx context.Context, request *model.GenerateInvoiceRequest, summary *model.InvoiceSummary) error
 	FindAllInvoices(ctx context.Context, request *model.FindAllInvoicesRequest) ([]model.InvoiceResponse, int64, error)
+	FindInvoiceByID(ctx context.Context, id uint) (*model.InvoiceData, error)
 }
 
 type SettingService interface {
@@ -277,7 +279,6 @@ func (h *ItemHandler) UpdateStock(c *fiber.Ctx) error {
 	}
 
 	request.ModifiedBy = auth.Fullname
-	h.log.Info(request)
 
 	response, err := h.stockService.UpdateStock(c.Context(), request)
 	if err != nil {
@@ -288,6 +289,41 @@ func (h *ItemHandler) UpdateStock(c *fiber.Ctx) error {
 	return c.JSON(model.Response[*model.StockResponse]{
 		Status:  fiber.StatusOK,
 		Message: "update stock item success",
+		Data:    response,
+	})
+}
+
+func (h *ItemHandler) EditStock(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
+	stockIdStr := c.Params("stock_id")
+	stockIdInt, err := strconv.Atoi(stockIdStr)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "stock_id must be a number")
+	}
+
+	request := new(model.EditStockRequest)
+	if err := c.ParamsParser(request); err != nil {
+		h.log.Warnf("failed to parse request params: %v", err)
+		return err
+	}
+	if err := c.BodyParser(request); err != nil {
+		h.log.Warnf("failed to parse request body: %v", err)
+		return err
+	}
+
+	request.StockID = stockIdInt
+	request.ModifiedBy = auth.Fullname
+
+	response, err := h.stockService.EditStock(c.Context(), request)
+	if err != nil {
+		h.log.Warnf("failed to edit stock item: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[*model.StockResponse]{
+		Status:  fiber.StatusOK,
+		Message: "edit stock item success",
 		Data:    response,
 	})
 }
@@ -313,6 +349,7 @@ func (h *ItemHandler) Delete(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) DeleteStock(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
 	id := c.Params("id")
 	stockIdStr := c.Params("stock_id")
 
@@ -322,8 +359,9 @@ func (h *ItemHandler) DeleteStock(c *fiber.Ctx) error {
 	}
 
 	request := &model.DeleteStockRequest{
-		ID:      id,
-		StockID: stockIdInt,
+		ID:         id,
+		StockID:    stockIdInt,
+		ModifiedBy: auth.Fullname,
 	}
 
 	response, err := h.stockService.DeleteStock(c.Context(), request)
@@ -532,7 +570,7 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, fmt.Sprintf("tidak ada data bahan %s pada rentang tanggal yang dipilih", label))
 	}
 
-	if err := h.invoiceService.SaveInvoice(c.Context(), request); err != nil {
+	if err := h.invoiceService.SaveInvoice(c.Context(), request, summary); err != nil {
 		h.log.Warnf("failed to save invoice record: %v", err)
 		return err
 	}
@@ -543,6 +581,10 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 	}
 
 	invoiceDate := util.FormatDateStringID(request.Date)
+
+	if strings.TrimSpace(request.BankAccount) == "" {
+		request.BankAccount = service.DefaultBankAccount
+	}
 
 	pdfData := &model.InvoiceData{
 		StockType:       stockType,
@@ -560,6 +602,7 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		Keterangan:      request.Keterangan,
 		Penanggungjawab: request.Penanggungjawab,
 		Jabatan:         request.Jabatan,
+		BankAccount:     request.BankAccount,
 	}
 
 	pdfBuffer, err := util.GenerateTemplateInvoicePDF(pdfData)
@@ -623,4 +666,45 @@ func (h *ItemHandler) GetInvoiceHistory(c *fiber.Ctx) error {
 			TotalPage: totalPage,
 		},
 	})
+}
+
+func (h *ItemHandler) DownloadInvoicePDF(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil || id == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid invoice id")
+	}
+
+	pdfData, err := h.invoiceService.FindInvoiceByID(c.Context(), uint(id))
+	if err != nil {
+		h.log.Warnf("failed to find invoice %d: %v", id, err)
+		return err
+	}
+
+	if len(pdfData.Items) == 0 {
+		return fiber.NewError(fiber.StatusUnprocessableEntity, "invoice tidak memiliki rincian bahan; tidak dapat diunduh ulang")
+	}
+
+	pdfBuffer, err := util.GenerateTemplateInvoicePDF(pdfData)
+	if err != nil {
+		h.log.Warnf("failed to regenerate invoice PDF: %v", err)
+		return err
+	}
+
+	safeInvoiceNo := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, pdfData.InvoiceNo)
+	filename := url.PathEscape(fmt.Sprintf("invoice-%s.pdf", safeInvoiceNo))
+
+	disposition := "attachment"
+	if strings.EqualFold(c.Query("mode"), "view") {
+		disposition = "inline"
+	}
+
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, filename))
+	return c.Send(pdfBuffer.Bytes())
 }

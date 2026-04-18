@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
 
 	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
 	"github.com/ridwanmuh3/simba-server/internal/model"
@@ -16,10 +15,10 @@ import (
 // lifetimes. Access cookie is available to the whole API; refresh cookie is
 // path-scoped to the refresh endpoint so it is not sent on every request and
 // cannot be grabbed from CSRF-vulnerable endpoints outside /api/auth.
-func setAuthCookies(c *fiber.Ctx, config *viper.Viper, accessToken, refreshToken string) {
-	isProduction := strings.HasPrefix(config.GetString("APP_CORS_ALLOWED_ORIGINS"), "https")
+func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string) {
+	isSecureRequest := strings.EqualFold(c.Protocol(), "https")
 	sameSite := "Lax"
-	if isProduction {
+	if isSecureRequest {
 		sameSite = "Strict"
 	}
 	now := time.Now()
@@ -30,7 +29,7 @@ func setAuthCookies(c *fiber.Ctx, config *viper.Viper, accessToken, refreshToken
 		Path:     "/",
 		Expires:  now.Add(service.AccessTokenTTL),
 		HTTPOnly: true,
-		Secure:   isProduction,
+		Secure:   isSecureRequest,
 		SameSite: sameSite,
 	})
 
@@ -40,15 +39,15 @@ func setAuthCookies(c *fiber.Ctx, config *viper.Viper, accessToken, refreshToken
 		Path:     "/api/auth",
 		Expires:  now.Add(service.RefreshTokenTTL),
 		HTTPOnly: true,
-		Secure:   isProduction,
+		Secure:   isSecureRequest,
 		SameSite: sameSite,
 	})
 }
 
-func clearAuthCookies(c *fiber.Ctx, config *viper.Viper) {
-	isProduction := strings.HasPrefix(config.GetString("APP_CORS_ALLOWED_ORIGINS"), "https")
+func clearAuthCookies(c *fiber.Ctx) {
+	isSecureRequest := strings.EqualFold(c.Protocol(), "https")
 	sameSite := "Lax"
-	if isProduction {
+	if isSecureRequest {
 		sameSite = "Strict"
 	}
 
@@ -59,7 +58,7 @@ func clearAuthCookies(c *fiber.Ctx, config *viper.Viper) {
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 		HTTPOnly: true,
-		Secure:   isProduction,
+		Secure:   isSecureRequest,
 		SameSite: sameSite,
 	})
 
@@ -70,7 +69,7 @@ func clearAuthCookies(c *fiber.Ctx, config *viper.Viper) {
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 		HTTPOnly: true,
-		Secure:   isProduction,
+		Secure:   isSecureRequest,
 		SameSite: sameSite,
 	})
 }
@@ -88,7 +87,7 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return err
 	}
 
-	setAuthCookies(c, h.config, response.Token, response.RefreshToken)
+	setAuthCookies(c, response.Token, response.RefreshToken)
 
 	return c.JSON(model.Response[*model.Auth]{
 		Status:  fiber.StatusOK,
@@ -107,12 +106,12 @@ func (h *UserHandler) Refresh(c *fiber.Ctx) error {
 		RefreshToken: refresh,
 	})
 	if err != nil {
-		clearAuthCookies(c, h.config)
+		clearAuthCookies(c)
 		h.log.Warnf("failed to refresh session: %v", err)
 		return err
 	}
 
-	setAuthCookies(c, h.config, response.Token, response.RefreshToken)
+	setAuthCookies(c, response.Token, response.RefreshToken)
 
 	return c.JSON(model.Response[*model.Auth]{
 		Status:  fiber.StatusOK,
@@ -133,22 +132,7 @@ func (h *UserHandler) Logout(c *fiber.Ctx) error {
 		return err
 	}
 
-	isProduction := strings.HasPrefix(h.config.GetString("APP_CORS_ALLOWED_ORIGINS"), "https")
-	sameSite := "Lax"
-	if isProduction {
-		sameSite = "Strict"
-	}
-
-	c.Cookie(&fiber.Cookie{
-		Name:     "token",
-		Value:    "",
-		Path:     "/",
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
-		HTTPOnly: true,
-		Secure:   isProduction,
-		SameSite: sameSite,
-	})
+	clearAuthCookies(c)
 
 	return c.JSON(model.Response[bool]{
 		Status:  fiber.StatusOK,

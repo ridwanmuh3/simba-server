@@ -164,11 +164,20 @@ func main() {
 		// Set created_at via raw SQL after creation
 		createdAt := now.AddDate(0, 0, -ss.DaysAgo)
 
+		var existingCount int64
+		db.Model(&entity.StockTracking{}).
+			Where("item_id = ? AND type = ? AND amount = ? AND supplier = ? AND created_at = ?",
+				ss.ItemID, ss.Type, ss.Amount, ss.Supplier, createdAt).
+			Count(&existingCount)
+		if existingCount > 0 {
+			log.Warnf("stock track for %s already exists, skipping", ss.ItemID)
+			continue
+		}
+
 		if err := db.Create(&st).Error; err != nil {
 			log.Warnf("stock track for %s failed: %v", ss.ItemID, err)
 			continue
 		}
-		// Update the timestamp
 		db.Model(&entity.StockTracking{}).Where("id = ?", st.ID).Update("created_at", createdAt)
 	}
 
@@ -184,28 +193,117 @@ func main() {
 	// ──────────────────────────────────────────────
 	// 4. Seed Finances (12 records)
 	// ──────────────────────────────────────────────
+	// Normalize old seed values ("in"/"out") to match app convention.
+	db.Model(&entity.Finance{}).Where("type = ?", "in").Update("type", "PEMASUKAN")
+	db.Model(&entity.Finance{}).Where("type = ?", "out").Update("type", "PENGELUARAN")
+
 	finances := []entity.Finance{
-		{Type: "in", Category: "Penjualan", Description: "Penjualan kue tart pesanan Ibu Sari", Amount: 850000, ExtraNote: "Dibayar tunai", ProofImage: "/uploads/finances-proof/seed-proof-1.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "in", Category: "Penjualan", Description: "Penjualan roti tawar harian", Amount: 320000, ExtraNote: "Transfer BCA", ProofImage: "/uploads/finances-proof/seed-proof-2.png", ModifiedBy: "Andi Wijaya"},
-		{Type: "out", Category: "Pembelian Bahan", Description: "Pembelian tepung terigu 50kg", Amount: 600000, ExtraNote: "Bayar ke PT Bogasari", ProofImage: "/uploads/finances-proof/seed-proof-3.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "out", Category: "Operasional", Description: "Bayar listrik bulan Maret", Amount: 450000, ExtraNote: "Token listrik", ProofImage: "/uploads/finances-proof/seed-proof-4.png", ModifiedBy: "Farah Nabila"},
-		{Type: "in", Category: "Penjualan", Description: "Penjualan brownies box 20pcs", Amount: 1200000, ExtraNote: "Pesanan katering", ProofImage: "/uploads/finances-proof/seed-proof-5.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "out", Category: "Pembelian Bahan", Description: "Pembelian gula pasir 30kg", Amount: 450000, ExtraNote: "Bayar tunai ke CV Makmur", ProofImage: "/uploads/finances-proof/seed-proof-6.png", ModifiedBy: "Andi Wijaya"},
-		{Type: "out", Category: "Gaji", Description: "Gaji karyawan bulan Maret", Amount: 3500000, ExtraNote: "Transfer payroll", ProofImage: "/uploads/finances-proof/seed-proof-7.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "in", Category: "Penjualan", Description: "Penjualan donat isi 50pcs", Amount: 500000, ExtraNote: "Cash on delivery", ProofImage: "/uploads/finances-proof/seed-proof-8.png", ModifiedBy: "Aulia Rahman"},
-		{Type: "out", Category: "Operasional", Description: "Bayar sewa tempat bulan Maret", Amount: 2000000, ExtraNote: "Transfer ke pemilik ruko", ProofImage: "/uploads/finances-proof/seed-proof-9.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "in", Category: "Penjualan", Description: "Penjualan cake ulang tahun", Amount: 750000, ExtraNote: "DP 50%, sisanya COD", ProofImage: "/uploads/finances-proof/seed-proof-10.png", ModifiedBy: "Farah Nabila"},
-		{Type: "out", Category: "Pembelian Bahan", Description: "Pembelian keju cheddar 10kg", Amount: 850000, ExtraNote: "PT Kraft, invoice NET30", ProofImage: "/uploads/finances-proof/seed-proof-11.png", ModifiedBy: "Andi Wijaya"},
-		{Type: "in", Category: "Penjualan", Description: "Penjualan roti manis assorted", Amount: 680000, ExtraNote: "Dibayar via QRIS", ProofImage: "/uploads/finances-proof/seed-proof-12.png", ModifiedBy: "Budi Almaliki"},
+		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan kue tart pesanan Ibu Sari", Amount: 850000, ExtraNote: "Dibayar tunai", ProofImage: "/uploads/finances-proof/seed-proof-1.png", ModifiedBy: "Budi Almaliki"},
+		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan roti tawar harian", Amount: 320000, ExtraNote: "Transfer BCA", ProofImage: "/uploads/finances-proof/seed-proof-2.png", ModifiedBy: "Andi Wijaya"},
+		{Type: "PENGELUARAN", Category: "Pembelian Bahan", Description: "Pembelian tepung terigu 50kg", Amount: 600000, ExtraNote: "Bayar ke PT Bogasari", ProofImage: "/uploads/finances-proof/seed-proof-3.png", ModifiedBy: "Budi Almaliki"},
+		{Type: "PENGELUARAN", Category: "Operasional", Description: "Bayar listrik bulan Maret", Amount: 450000, ExtraNote: "Token listrik", ProofImage: "/uploads/finances-proof/seed-proof-4.png", ModifiedBy: "Farah Nabila"},
+		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan brownies box 20pcs", Amount: 1200000, ExtraNote: "Pesanan katering", ProofImage: "/uploads/finances-proof/seed-proof-5.png", ModifiedBy: "Budi Almaliki"},
+		{Type: "PENGELUARAN", Category: "Pembelian Bahan", Description: "Pembelian gula pasir 30kg", Amount: 450000, ExtraNote: "Bayar tunai ke CV Makmur", ProofImage: "/uploads/finances-proof/seed-proof-6.png", ModifiedBy: "Andi Wijaya"},
+		{Type: "PENGELUARAN", Category: "Gaji", Description: "Gaji karyawan bulan Maret", Amount: 3500000, ExtraNote: "Transfer payroll", ProofImage: "/uploads/finances-proof/seed-proof-7.png", ModifiedBy: "Budi Almaliki"},
+		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan donat isi 50pcs", Amount: 500000, ExtraNote: "Cash on delivery", ProofImage: "/uploads/finances-proof/seed-proof-8.png", ModifiedBy: "Aulia Rahman"},
+		{Type: "PENGELUARAN", Category: "Operasional", Description: "Bayar sewa tempat bulan Maret", Amount: 2000000, ExtraNote: "Transfer ke pemilik ruko", ProofImage: "/uploads/finances-proof/seed-proof-9.png", ModifiedBy: "Budi Almaliki"},
+		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan cake ulang tahun", Amount: 750000, ExtraNote: "DP 50%, sisanya COD", ProofImage: "/uploads/finances-proof/seed-proof-10.png", ModifiedBy: "Farah Nabila"},
+		{Type: "PENGELUARAN", Category: "Pembelian Bahan", Description: "Pembelian keju cheddar 10kg", Amount: 850000, ExtraNote: "PT Kraft, invoice NET30", ProofImage: "/uploads/finances-proof/seed-proof-11.png", ModifiedBy: "Andi Wijaya"},
+		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan roti manis assorted", Amount: 680000, ExtraNote: "Dibayar via QRIS", ProofImage: "/uploads/finances-proof/seed-proof-12.png", ModifiedBy: "Budi Almaliki"},
 	}
 
 	for i, f := range finances {
-		f.Model.CreatedAt = now.AddDate(0, 0, -(28-i*2))
+		f.Model.CreatedAt = now.AddDate(0, 0, -(28 - i*2))
+		var existingCount int64
+		db.Model(&entity.Finance{}).
+			Where("description = ? AND amount = ? AND type = ?", f.Description, f.Amount, f.Type).
+			Count(&existingCount)
+		if existingCount > 0 {
+			log.Warnf("finance record %d may already exist, skipping", i+1)
+			continue
+		}
 		if err := db.Create(&f).Error; err != nil {
 			log.Warnf("finance record %d failed: %v", i+1, err)
 		}
 	}
 	log.Info("seeding finances done")
+
+	// ──────────────────────────────────────────────
+	// 5. Seed Invoices (6 records)
+	// ──────────────────────────────────────────────
+	db.Exec("UPDATE invoices SET invoice_number = regexp_replace(invoice_number, '^INV-[0-9]{4}-', 'INV-') WHERE invoice_number ~ '^INV-[0-9]{4}-'")
+	db.Exec("UPDATE invoices SET po_number = regexp_replace(po_number, '^PO-[0-9]{4}-', 'PO-') WHERE po_number ~ '^PO-[0-9]{4}-'")
+	db.Exec("UPDATE invoices SET quo_number = regexp_replace(quo_number, '^QUO-[0-9]{4}-', 'QUO-') WHERE quo_number ~ '^QUO-[0-9]{4}-'")
+
+	invoices := []entity.Invoice{
+		{
+			StockType:      "OUT",
+			CompanyName:    "CV Sinar Pangan",
+			CompanyContact: "0812-3456-7890",
+			CompanyAddress: "Jl. Melati No. 12, Bandung",
+			InvoiceNumber:  "INV-0001",
+			PONumber:       "PO-0101",
+			QuoNumber:      "QUO-0091",
+		},
+		{
+			StockType:      "OUT",
+			CompanyName:    "PT Rasa Nusantara",
+			CompanyContact: "0813-2222-3333",
+			CompanyAddress: "Jl. Sudirman No. 88, Jakarta",
+			InvoiceNumber:  "INV-0002",
+			PONumber:       "PO-0102",
+			QuoNumber:      "QUO-0092",
+		},
+		{
+			StockType:      "OUT",
+			CompanyName:    "UD Kue Manis",
+			CompanyContact: "0812-7788-9900",
+			CompanyAddress: "Jl. Diponegoro No. 45, Surabaya",
+			InvoiceNumber:  "INV-0003",
+			PONumber:       "PO-0103",
+			QuoNumber:      "QUO-0093",
+		},
+		{
+			StockType:      "IN",
+			CompanyName:    "PT Bumi Boga",
+			CompanyContact: "0812-9090-1234",
+			CompanyAddress: "Jl. Gatot Subroto No. 7, Semarang",
+			InvoiceNumber:  "INV-0004",
+			PONumber:       "PO-0104",
+			QuoNumber:      "QUO-0094",
+		},
+		{
+			StockType:      "OUT",
+			CompanyName:    "CV Manis Jaya",
+			CompanyContact: "0821-4567-8910",
+			CompanyAddress: "Jl. Ahmad Yani No. 23, Yogyakarta",
+			InvoiceNumber:  "INV-0005",
+			PONumber:       "PO-0105",
+			QuoNumber:      "QUO-0095",
+		},
+		{
+			StockType:      "OUT",
+			CompanyName:    "PT Sentra Bakery",
+			CompanyContact: "0813-5555-6677",
+			CompanyAddress: "Jl. Asia Afrika No. 99, Bandung",
+			InvoiceNumber:  "INV-0006",
+			PONumber:       "PO-0106",
+			QuoNumber:      "QUO-0096",
+		},
+	}
+
+	for i := range invoices {
+		invoices[i].CreatedAt = now.AddDate(0, 0, -(12 - i*2))
+		var existing entity.Invoice
+		if err := db.Where("invoice_number = ?", invoices[i].InvoiceNumber).First(&existing).Error; err == nil {
+			log.Warnf("invoice %s may already exist", invoices[i].InvoiceNumber)
+			continue
+		}
+		if err := db.Create(&invoices[i]).Error; err != nil {
+			log.Warnf("invoice record %d failed: %v", i+1, err)
+		}
+	}
+	log.Info("seeding invoices done")
 
 	fmt.Println("✅ All seed data inserted successfully!")
 }

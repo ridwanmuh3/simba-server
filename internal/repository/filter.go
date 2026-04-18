@@ -10,16 +10,21 @@ import (
 // RFC3339Nano date range. Both bounds are inclusive. Empty strings are ignored.
 func DateRangeScope(column, from, to string) func(*gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
+		loc, _ := time.LoadLocation("Asia/Jakarta")
 		if from != "" {
 			parsed, err := time.Parse(time.RFC3339Nano, from)
 			if err == nil {
-				tx = tx.Where(column+" >= ?", parsed.UTC())
+				parsed = parsed.In(loc)
+				startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
+				tx = tx.Where(column+" >= ?", startOfDay.UTC())
 			}
 		}
 		if to != "" {
 			parsed, err := time.Parse(time.RFC3339Nano, to)
 			if err == nil {
-				tx = tx.Where(column+" <= ?", parsed.UTC())
+				parsed = parsed.In(loc)
+				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 999999999, loc)
+				tx = tx.Where(column+" <= ?", endOfDay.UTC())
 			}
 		}
 		return tx

@@ -21,7 +21,7 @@ type DashboardService struct {
 
 type DashboardRepository interface {
 	GetItemCount(db *gorm.DB) (int64, error)
-	SumStockByType(db *gorm.DB, stockType string) (int64, error)
+	SumStockByType(db *gorm.DB, stockType string) (float64, error)
 	GetFinanceSummary(db *gorm.DB) (int64, int64, error)
 	GetMonthlyStats(db *gorm.DB) ([]model.MonthlyBudgetStat, error)
 	GetExpenseComposition(db *gorm.DB) ([]model.ExpenseComposition, error)

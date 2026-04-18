@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/go-playground/validator/v10"
@@ -40,184 +41,389 @@ func NewStockService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator
 		itemRepository: itemRepository,
 	}
 }
-
 func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateItemStockRequest) (*model.StockResponse, error) {
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
 
+	// 1. VALIDATION
 	if err := s.validate.Struct(request); err != nil {
-		s.log.Errorf("failed to validate request body: %v", err)
 		return nil, err
 	}
-
-	item := new(entity.Item)
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(item, "id = ?", request.ID).Error; err != nil {
-		s.log.Errorf("failed to find item by code: %v", err)
-		return nil, exception.ItemNotFoundError
+	if request.Amount <= 0 {
+		return nil, fiber.NewError(fiber.StatusBadRequest, "amount must be greater than 0")
 	}
-
 	if request.Supplier == "" {
 		request.Supplier = "-"
 	}
 
-	stockTracking := new(entity.StockTracking)
-	stockTracking.ItemID = item.ID
-	stockTracking.Type = request.Type
-	stockTracking.ModifiedBy = request.ModifiedBy
-	stockTracking.PreviousStock = item.Stock
-	stockTracking.Amount = request.Amount
-	stockTracking.UnitPrice = request.UnitPrice
-	stockTracking.Supplier = request.Supplier
+	// 2. LOCK ITEM
+	item := new(entity.Item)
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(item, "id = ?", request.ID).Error; err != nil {
+		return nil, exception.ItemNotFoundError
+	}
 
+	// 3. GET LAST TRACKING (DETERMINISTIC)
+	var last entity.StockTracking
+	err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("item_id = ? AND deleted_at IS NULL", item.ID).
+		Order("created_at DESC, id DESC"). // 🔥 penting (hindari collision)
+		First(&last).Error
+
+	var previousStock float64
+	var currentTotalPrice float64
+
+	if err == nil {
+		// 🔥 source of truth dari tracking terakhir
+		previousStock = last.NewStock
+
+		// totalPrice tetap dari item (karena itu agregat resmi)
+		currentTotalPrice = item.TotalPrice
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		// first transaction
+		previousStock = 0
+		currentTotalPrice = 0
+	} else {
+		return nil, exception.InternalServerError
+	}
+
+	// 4. INIT TRACKING
+	tr := &entity.StockTracking{
+		ItemID:        item.ID,
+		Type:          request.Type,
+		ModifiedBy:    request.ModifiedBy,
+		PreviousStock: util.Round4(previousStock),
+		Amount:        request.Amount,
+		UnitPrice:     request.UnitPrice,
+		Supplier:      request.Supplier,
+	}
+
+	// 5. CORE (MAC SAFE, BASED ON previousStock)
 	switch request.Type {
 
 	case "IN":
-		newStock := util.Round4(item.Stock + request.Amount)
-
+		newStock := util.Round4(previousStock + request.Amount)
 		addedTotal := util.Round2(request.Amount * request.UnitPrice)
 
 		item.Stock = newStock
-		item.TotalPrice = util.Round2(item.TotalPrice + addedTotal)
+		item.TotalPrice = util.Round2(currentTotalPrice + addedTotal)
 
-		stockTracking.NewStock = newStock
-		stockTracking.TotalPrice = addedTotal
+		tr.NewStock = newStock
+		tr.TotalPrice = addedTotal
 
 	case "OUT":
-		if item.Stock < request.Amount {
-			s.log.Errorf("failed to decrease item stock: insufficient stock")
-			return nil, fiber.NewError(fiber.StatusBadRequest, "stock must be sufficient enough to decreased")
+		if previousStock < request.Amount {
+			return nil, fiber.NewError(fiber.StatusBadRequest, "insufficient stock")
 		}
-
-		if item.Stock <= 0 {
+		if previousStock == 0 {
 			return nil, fiber.NewError(fiber.StatusBadRequest, "invalid stock state")
 		}
 
-		// For OUT invoice lines, use the explicit request.UnitPrice × Amount
-		// (billed price) rather than weighted average cost, so invoice totals
-		// match what was charged to the receiver.
-		newStock := util.Round4(item.Stock - request.Amount)
-		lineTotal := util.Round2(request.Amount * request.UnitPrice)
+		avg := util.Round4(currentTotalPrice / previousStock)
 
-		// Internal stock value tracked with weighted-average for accurate budgeting.
-		avg := item.TotalPrice / item.Stock
-		deduction := util.Round2(avg * request.Amount)
+		newStock := util.Round4(previousStock - request.Amount)
+		deduction := util.Round2(avg * request.Amount)               // MAC (inventory)
+		lineTotal := util.Round2(request.Amount * request.UnitPrice) // invoice
 
 		item.Stock = newStock
-		item.TotalPrice = util.Round2(item.TotalPrice - deduction)
+		item.TotalPrice = util.Round2(currentTotalPrice - deduction)
 
-		stockTracking.NewStock = newStock
-		stockTracking.TotalPrice = lineTotal
+		tr.NewStock = newStock
+		tr.TotalPrice = lineTotal
 
 	default:
-		s.log.Errorf("invalid stock type '%s'", request.Type)
-		return nil, fiber.NewError(fiber.StatusBadRequest, "invalid update stock type")
+		return nil, fiber.NewError(fiber.StatusBadRequest, "invalid stock type")
 	}
 
+	if tr.NewStock < 0 {
+		return nil, fiber.NewError(fiber.StatusBadRequest, "stock cannot be negative")
+	}
+
+	// 6. SAVE ITEM
 	if err := s.itemRepository.Update(tx, item, item.ID); err != nil {
-		s.log.Errorf("failed to update item stock: %v", err)
 		return nil, exception.InternalServerError
 	}
 
-	if err := tx.Create(stockTracking).Error; err != nil {
-		s.log.Errorf("failed to create stock tracking: %v", err)
+	// 7. SAVE TRACKING
+	if err := tx.Create(tr).Error; err != nil {
 		return nil, exception.InternalServerError
 	}
 
+	// 8. ACTIVITY
 	if err := tx.Create(&entity.ActivityLog{
-		Type:        "UPDATE-STOCK",
-		Title:       "Stok bahan diperbarui",
-		Description: fmt.Sprintf("%s - %g %s", item.Name, item.Stock, item.MeasureUnit),
-		ActionBy:    request.ModifiedBy,
+		Type:  "UPDATE-STOCK",
+		Title: "Stok bahan diperbarui",
+		Description: fmt.Sprintf(
+			"%s: %.2f → %.2f %s",
+			item.Name,
+			tr.PreviousStock,
+			tr.NewStock,
+			item.MeasureUnit,
+		),
+		ActionBy: request.ModifiedBy,
 	}).Error; err != nil {
-		s.log.Errorf("failed to save activity log: %v", err)
 		return nil, exception.InternalServerError
 	}
 
+	// 9. COMMIT
 	if err := tx.Commit().Error; err != nil {
-		s.log.Errorf("failed to commit transaction: %v", err)
 		return nil, exception.InternalServerError
 	}
 
-	return converter.StockToResponse(stockTracking), nil
+	return converter.StockToResponse(tr), nil
+}
+func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRequest) (*model.StockResponse, error) {
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+
+	// 1. VALIDATION
+	if err := s.validate.Struct(request); err != nil {
+		return nil, err
+	}
+	if request.Supplier == "" {
+		request.Supplier = "-"
+	}
+
+	// 2. LOCK ITEM
+	item := new(entity.Item)
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(item, "id = ?", request.ID).Error; err != nil {
+		return nil, exception.ItemNotFoundError
+	}
+
+	// 3. LOCK & MUTATE TARGET TRACKING
+	stock := new(entity.StockTracking)
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND item_id = ?", request.StockID, request.ID).
+		First(stock).Error; err != nil {
+		return nil, exception.ItemNotFoundError
+	}
+
+	stock.Amount = request.Amount
+	stock.UnitPrice = request.UnitPrice
+	stock.Supplier = request.Supplier
+	stock.ModifiedBy = request.ModifiedBy
+
+	if err := tx.Model(stock).Updates(map[string]any{
+		"amount":      stock.Amount,
+		"unit_price":  stock.UnitPrice,
+		"supplier":    stock.Supplier,
+		"modified_by": stock.ModifiedBy,
+	}).Error; err != nil {
+		return nil, exception.InternalServerError
+	}
+
+	// 4. GET ALL TRACKING IN ORDER
+	var tracks []entity.StockTracking
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("item_id = ?", item.ID).
+		Order("created_at ASC, id ASC").
+		Find(&tracks).Error; err != nil {
+		return nil, exception.InternalServerError
+	}
+
+	// 5. REBUILD MAC
+	var runningStock float64 = item.InitialStock
+	var totalPrice float64 = util.Round2(item.InitialStock * item.UnitPrice)
+
+	var updatedTarget *entity.StockTracking
+
+	for i := range tracks {
+		prev := runningStock
+		tracks[i].PreviousStock = util.Round4(prev)
+
+		switch tracks[i].Type {
+
+		case "IN":
+			added := util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
+
+			runningStock = util.Round4(prev + tracks[i].Amount)
+			totalPrice = util.Round2(totalPrice + added)
+
+			tracks[i].TotalPrice = added
+
+		case "OUT":
+			if prev < tracks[i].Amount {
+				return nil, fiber.NewError(fiber.StatusBadRequest, "edit would result in invalid stock history")
+			}
+
+			avg := util.Round4(totalPrice / prev)
+
+			deduction := util.Round2(avg * tracks[i].Amount)
+			lineTotal := util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
+
+			runningStock = util.Round4(prev - tracks[i].Amount)
+			totalPrice = util.Round2(totalPrice - deduction)
+
+			tracks[i].TotalPrice = lineTotal
+		}
+
+		tracks[i].NewStock = util.Round4(runningStock)
+
+		if runningStock < 0 {
+			return nil, fiber.NewError(fiber.StatusBadRequest, "edit would cause stock to go negative")
+		}
+
+		if tracks[i].ID == uint(request.StockID) {
+			updatedTarget = &tracks[i]
+		}
+	}
+
+	// 6. UPDATE ALL TRACKING
+	for i := range tracks {
+		if err := tx.Model(&entity.StockTracking{}).
+			Where("id = ?", tracks[i].ID).
+			Updates(map[string]any{
+				"previous_stock": tracks[i].PreviousStock,
+				"new_stock":      tracks[i].NewStock,
+				"total_price":    tracks[i].TotalPrice,
+			}).Error; err != nil {
+			return nil, exception.InternalServerError
+		}
+	}
+
+	// 7. UPDATE ITEM
+	item.Stock = util.Round4(runningStock)
+	item.TotalPrice = util.Round2(totalPrice)
+
+	if err := tx.Save(item).Error; err != nil {
+		return nil, exception.InternalServerError
+	}
+
+	// 8. ACTIVITY LOG
+	if err := tx.Create(&entity.ActivityLog{
+		Type:  "EDIT-STOCK-" + stock.Type,
+		Title: "Stock entry edited and chain recalculated",
+		Description: fmt.Sprintf(
+			"%s [%s]: %.2f @ %.2f → stock %.2f %s",
+			item.Name,
+			stock.Type,
+			request.Amount,
+			request.UnitPrice,
+			item.Stock,
+			item.MeasureUnit,
+		),
+		ActionBy: request.ModifiedBy,
+	}).Error; err != nil {
+		return nil, exception.InternalServerError
+	}
+
+	// 9. COMMIT
+	if err := tx.Commit().Error; err != nil {
+		return nil, exception.InternalServerError
+	}
+
+	if updatedTarget == nil {
+		return nil, exception.InternalServerError
+	}
+
+	return converter.StockToResponse(updatedTarget), nil
 }
 
 func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteStockRequest) (bool, error) {
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
 
+	// 1. VALIDATION
 	if err := s.validate.Struct(request); err != nil {
 		return false, err
 	}
 
+	// 2. LOCK ITEM
 	item := new(entity.Item)
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ?", request.ID).
-		First(item).Error; err != nil {
+		First(item, "id = ?", request.ID).Error; err != nil {
 		return false, exception.ItemNotFoundError
 	}
 
+	// 3. GET TARGET TRACKING
 	stock := new(entity.StockTracking)
 	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id = ? AND item_id = ?", request.StockID, request.ID).
 		First(stock).Error; err != nil {
 		return false, exception.ItemNotFoundError
 	}
 
-	// We delete the tracking record first.
+	// 4. HARD DELETE
 	if err := tx.
-		Where("id = ? AND item_id = ?", request.StockID, item.ID).
-		Delete(&entity.StockTracking{}).Error; err != nil {
+		Unscoped().
+		Delete(&entity.StockTracking{}, "id = ?", stock.ID).Error; err != nil {
 		return false, exception.InternalServerError
 	}
 
-	// Recalculate stock and total price from history
-	var stockTracks []entity.StockTracking
-	if err := tx.Where("item_id = ?", item.ID).
-		Order("created_at ASC").
-		Find(&stockTracks).Error; err != nil {
+	// 5. GET ALL TRACKING (ORDER FIX)
+	var tracks []entity.StockTracking
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("item_id = ?", item.ID).
+		Order("created_at ASC, id ASC"). // 🔥 penting
+		Find(&tracks).Error; err != nil {
 		return false, exception.InternalServerError
 	}
 
-	runningStock := item.InitialStock
-	totalPrice := util.Round2(item.InitialStock * item.UnitPrice)
+	// 6. REBUILD MAC (seed from InitialStock/UnitPrice so items without IN-tracking don't break)
+	var runningStock float64 = item.InitialStock
+	var totalPrice float64 = util.Round2(item.InitialStock * item.UnitPrice)
 
-	for i := range stockTracks {
-		prevStock := runningStock
-		stockTracks[i].PreviousStock = util.Round4(prevStock)
+	for i := range tracks {
 
-		switch stockTracks[i].Type {
+		prev := runningStock
+		tracks[i].PreviousStock = util.Round4(prev)
+
+		switch tracks[i].Type {
 
 		case "IN":
-			runningStock = util.Round4(runningStock + stockTracks[i].Amount)
-			totalPrice = util.Round2(totalPrice + stockTracks[i].Amount*stockTracks[i].UnitPrice)
+			added := util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
+
+			runningStock = util.Round4(prev + tracks[i].Amount)
+			totalPrice = util.Round2(totalPrice + added)
+
+			tracks[i].TotalPrice = added
 
 		case "OUT":
-			if prevStock > 0 {
-				avg := totalPrice / prevStock
-				deduction := util.Round2(avg * stockTracks[i].Amount)
-				runningStock = util.Round4(runningStock - stockTracks[i].Amount)
-				totalPrice = util.Round2(totalPrice - deduction)
-			} else {
-				runningStock = util.Round4(runningStock - stockTracks[i].Amount)
+			if prev < tracks[i].Amount {
+				return false, fiber.NewError(fiber.StatusBadRequest, "invalid stock history")
 			}
+
+			avg := util.Round4(totalPrice / prev)
+
+			deduction := util.Round2(avg * tracks[i].Amount)
+			lineTotal := util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
+
+			runningStock = util.Round4(prev - tracks[i].Amount)
+			totalPrice = util.Round2(totalPrice - deduction)
+
+			tracks[i].TotalPrice = lineTotal
 		}
 
-		stockTracks[i].NewStock = util.Round4(runningStock)
+		tracks[i].NewStock = util.Round4(runningStock)
+
+		if runningStock < 0 {
+			return false, fiber.NewError(fiber.StatusBadRequest, "stock became negative")
+		}
 	}
 
-	for i := range stockTracks {
+	// 7. UPDATE TRACKING (CHAIN FIX)
+	for i := range tracks {
 		if err := tx.Model(&entity.StockTracking{}).
-			Where("id = ?", stockTracks[i].ID).
+			Where("id = ?", tracks[i].ID).
 			Updates(map[string]any{
-				"previous_stock": stockTracks[i].PreviousStock,
-				"new_stock":      stockTracks[i].NewStock,
+				"previous_stock": tracks[i].PreviousStock,
+				"new_stock":      tracks[i].NewStock,
+				"total_price":    tracks[i].TotalPrice,
 			}).Error; err != nil {
 			return false, exception.InternalServerError
 		}
 	}
 
+	// 8. UPDATE ITEM
 	item.Stock = util.Round4(runningStock)
 	item.TotalPrice = util.Round2(totalPrice)
 
@@ -225,6 +431,7 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 		return false, exception.InternalServerError
 	}
 
+	// 9. ACTIVITY LOG
 	action := "DELETE-STOCK"
 	if stock.Type == "IN" {
 		action = "DELETE-STOCK-IN"
@@ -233,14 +440,20 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 	}
 
 	if err := tx.Create(&entity.ActivityLog{
-		Type:        action,
-		Title:       "Stock updated",
-		Description: fmt.Sprintf("%s - %g %s", item.Name, item.Stock, item.MeasureUnit),
-		ActionBy:    item.ModifiedBy,
+		Type:  action,
+		Title: "Stock recalculated after delete",
+		Description: fmt.Sprintf(
+			"%s: %.2f %s",
+			item.Name,
+			item.Stock,
+			item.MeasureUnit,
+		),
+		ActionBy: request.ModifiedBy,
 	}).Error; err != nil {
 		return false, exception.InternalServerError
 	}
 
+	// 10. COMMIT
 	if err := tx.Commit().Error; err != nil {
 		return false, exception.InternalServerError
 	}

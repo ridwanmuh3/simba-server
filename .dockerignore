@@ -1,2 +1,9 @@
 uploads
 bin
+.git
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.pfx

@@ -44,9 +44,12 @@ const (
 	KeyCompanyName    = "company_name"
 	KeyCompanyAddress = "company_address"
 	KeyCompanyContact = "company_contact"
+	KeyBankAccount    = "bank_account"
 	KeySeqInvoice     = "seq_invoice"
 	KeySeqQuotation   = "seq_quotation"
 )
+
+const DefaultBankAccount = "BNI 2048441550 A.N Koperasi Konsumen Dewa Makmur Multi Sejahtera"
 
 func parseDocumentSequence(value, prefix string) (int, bool) {
 	trimmed := strings.TrimSpace(value)
@@ -54,12 +57,16 @@ func parseDocumentSequence(value, prefix string) (int, bool) {
 		return 0, false
 	}
 
-	expectedPrefix := prefix + "-"
-	if !strings.HasPrefix(trimmed, expectedPrefix) {
+	parts := strings.Split(trimmed, "-")
+	if len(parts) < 2 {
 		return 0, false
 	}
 
-	seq, err := strconv.Atoi(strings.TrimPrefix(trimmed, expectedPrefix))
+	if !strings.EqualFold(parts[0], prefix) {
+		return 0, false
+	}
+
+	seq, err := strconv.Atoi(parts[len(parts)-1])
 	if err != nil {
 		return 0, false
 	}
@@ -96,8 +103,11 @@ func (s *SettingService) GetCompanyProfile(ctx context.Context) (*model.CompanyP
 	name, _ := s.settingRepo.GetByKey(db, KeyCompanyName)
 	address, _ := s.settingRepo.GetByKey(db, KeyCompanyAddress)
 	contact, _ := s.settingRepo.GetByKey(db, KeyCompanyContact)
+	bank, _ := s.settingRepo.GetByKey(db, KeyBankAccount)
 
-	resp := &model.CompanyProfileResponse{}
+	resp := &model.CompanyProfileResponse{
+		BankAccount: DefaultBankAccount,
+	}
 	if name != nil {
 		resp.CompanyName = name.Value
 	}
@@ -106,6 +116,9 @@ func (s *SettingService) GetCompanyProfile(ctx context.Context) (*model.CompanyP
 	}
 	if contact != nil {
 		resp.CompanyContact = contact.Value
+	}
+	if bank != nil && strings.TrimSpace(bank.Value) != "" {
+		resp.BankAccount = bank.Value
 	}
 
 	return resp, nil
@@ -126,6 +139,9 @@ func (s *SettingService) UpdateCompanyProfile(ctx context.Context, req *model.Co
 		return err
 	}
 	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyCompanyContact, Value: req.CompanyContact}); err != nil {
+		return err
+	}
+	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyBankAccount, Value: req.BankAccount}); err != nil {
 		return err
 	}
 

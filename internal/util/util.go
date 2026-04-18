@@ -66,12 +66,18 @@ func DeleteFile(filePath string) error {
 
 // sanitizeLatin1 maps runes outside Windows-1252 (fpdf default) to '?'
 // and strips control characters to prevent PDF stream injection.
+// Preserves '\n' so MultiCell renders user line breaks; strips other controls.
 func sanitizeLatin1(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
 	return strings.Map(func(r rune) rune {
+		if r == '\n' {
+			return r
+		}
+		if r == '\t' {
+			return ' '
+		}
 		if r < 0x20 {
-			if r == '\n' || r == '\t' {
-				return ' '
-			}
 			return -1
 		}
 		if r > 0xFF || !unicode.IsPrint(r) {
@@ -113,9 +119,18 @@ func formatRupiah(v float64) string {
 func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) {
 	// A5 Landscape (210mm x 148mm)
 	pdf := fpdf.New("L", "mm", "A5", "")
-	pdf.SetMargins(10, 10, 10)
-	// Reduce auto-break trigger to give more control over footer placement
-	pdf.SetAutoPageBreak(true, 10)
+
+	// Reduced top margin from 10 to 5 to pull everything up
+	pdf.SetMargins(10, 5, 10)
+	pdf.SetAutoPageBreak(true, 5)
+
+	// FIXED PAGINATION LOGIC
+	pdf.SetFooterFunc(func() {
+		pdf.SetY(-8) // Tighter to the bottom edge
+		pdf.SetFont("Arial", "I", 7)
+		pdf.CellFormat(0, 10, fmt.Sprintf("Halaman %d", pdf.PageNo()), "", 0, "R", false, 0, "")
+	})
+
 	pdf.AddPage()
 
 	invoiceTitle := "Invoice Bahan Keluar"
@@ -131,7 +146,7 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	pdf.SetFont("Arial", "", 9)
 	pdf.CellFormat(190, 4, sanitizeLatin1(data.CompanyAddress), "", 1, "L", false, 0, "")
 	pdf.CellFormat(190, 4, sanitizeLatin1(data.CompanyContact), "", 1, "L", false, 0, "")
-	pdf.Ln(2)
+	pdf.Ln(1) // Reduced from 2
 
 	// 2. Metadata Block
 	pdf.SetLineWidth(0.3)
@@ -145,15 +160,15 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	pdf.SetX(140)
 	pdf.CellFormat(60, 4, "No. Nota", "", 1, "R", false, 0, "")
 	pdf.SetFont("Arial", "B", 9)
-	pdf.CellFormat(30, 5, sanitizeLatin1(data.Date), "", 0, "L", false, 0, "")
+	pdf.CellFormat(30, 4, sanitizeLatin1(data.Date), "", 0, "L", false, 0, "")
 	if data.PONo != "" {
-		pdf.CellFormat(40, 5, sanitizeLatin1(data.PONo), "", 0, "L", false, 0, "")
+		pdf.CellFormat(40, 4, sanitizeLatin1(data.PONo), "", 0, "L", false, 0, "")
 	}
 	pdf.SetX(140)
 	pdf.SetFont("Arial", "B", 11)
-	pdf.CellFormat(60, 5, sanitizeLatin1(data.InvoiceNo), "", 1, "R", false, 0, "")
+	pdf.CellFormat(60, 4, sanitizeLatin1(data.InvoiceNo), "", 1, "R", false, 0, "")
 	pdf.Line(10, pdf.GetY(), 200, pdf.GetY())
-	pdf.Ln(4)
+	pdf.Ln(2) // Reduced from 4
 
 	// 3. Customer Info & Total
 	startY := pdf.GetY()
@@ -165,51 +180,53 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	pdf.SetY(startY)
 	pdf.SetX(110)
 	pdf.SetFont("Arial", "B", 12)
-	pdf.CellFormat(30, 10, "TOTAL Rp.", "", 0, "R", false, 0, "")
+	pdf.CellFormat(30, 8, "TOTAL Rp.", "", 0, "R", false, 0, "") // Height reduced from 10 to 8
 	pdf.SetFont("Arial", "B", 14)
-	pdf.CellFormat(60, 10, formatRupiah(data.GrandTotal), "", 1, "R", false, 0, "")
-	pdf.Ln(2)
+	pdf.CellFormat(60, 8, formatRupiah(data.GrandTotal), "", 1, "R", false, 0, "") // Height reduced
+	pdf.Ln(1)                                                                      // Reduced from 2
 
 	// 4. Table Header & Items
 	drawTableHeader := func() {
 		pdf.SetFont("Arial", "B", 9)
 		pdf.SetFillColor(220, 220, 220)
-		pdf.CellFormat(10, 6, "No", "1", 0, "C", true, 0, "")
-		pdf.CellFormat(65, 6, "Deskripsi", "1", 0, "C", true, 0, "")
-		pdf.CellFormat(15, 6, "Qty", "1", 0, "C", true, 0, "")
-		pdf.CellFormat(20, 6, "Unit", "1", 0, "C", true, 0, "")
-		pdf.CellFormat(30, 6, "Harga", "1", 0, "C", true, 0, "")
-		pdf.CellFormat(15, 6, "Disc", "1", 0, "C", true, 0, "")
-		pdf.CellFormat(35, 6, "Subtotal", "1", 1, "C", true, 0, "")
+		// Row heights reduced from 6 to 5
+		pdf.CellFormat(10, 5, "No", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(65, 5, "Deskripsi", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(15, 5, "Qty", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(20, 5, "Unit", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(30, 5, "Harga", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(15, 5, "Disc", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(35, 5, "Subtotal", "1", 1, "C", true, 0, "")
 		pdf.SetFont("Arial", "", 9)
 	}
 
 	drawTableHeader()
 
+	// Expanded Y-limit due to compacted header/rows
+	const itemsMaxY = 115.0
+	const lastPageItemsMaxY = 115.0
+
 	for i, item := range data.Items {
-		// Safety check: A5 height is 148mm.
-		// We trigger page break if Y > 100mm to leave room for the footer.
-		if pdf.GetY() > 100 {
+		if pdf.GetY() > itemsMaxY {
 			pdf.AddPage()
 			drawTableHeader()
 		}
-		pdf.CellFormat(10, 6, fmt.Sprintf("%d", i+1), "1", 0, "C", false, 0, "")
-		pdf.CellFormat(65, 6, sanitizeLatin1(item.Item.Name), "1", 0, "L", false, 0, "")
-		pdf.CellFormat(15, 6, fmt.Sprintf("%g", item.Amount), "1", 0, "C", false, 0, "")
-		pdf.CellFormat(20, 6, sanitizeLatin1(item.Item.MeasureUnit), "1", 0, "C", false, 0, "")
-		pdf.CellFormat(30, 6, formatRupiah(item.UnitPrice), "1", 0, "R", false, 0, "")
-		pdf.CellFormat(15, 6, "0", "1", 0, "C", false, 0, "")
-		pdf.CellFormat(35, 6, formatRupiah(item.TotalPrice), "1", 1, "R", false, 0, "")
+		// Row heights reduced from 6 to 5
+		pdf.CellFormat(10, 5, fmt.Sprintf("%d", i+1), "1", 0, "C", false, 0, "")
+		pdf.CellFormat(65, 5, sanitizeLatin1(item.Item.Name), "1", 0, "L", false, 0, "")
+		pdf.CellFormat(15, 5, fmt.Sprintf("%g", item.Amount), "1", 0, "C", false, 0, "")
+		pdf.CellFormat(20, 5, sanitizeLatin1(item.Item.MeasureUnit), "1", 0, "C", false, 0, "")
+		pdf.CellFormat(30, 5, formatRupiah(item.UnitPrice), "1", 0, "R", false, 0, "")
+		pdf.CellFormat(15, 5, "0", "1", 0, "C", false, 0, "")
+		pdf.CellFormat(35, 5, formatRupiah(item.TotalPrice), "1", 1, "R", false, 0, "")
 	}
 
 	// 5. Footer Logic
-	// If the table ends too low, force a page break BEFORE drawing the footer
-	// to avoid triggering an automatic one mid-footer.
-	if pdf.GetY() > 115 {
+	if pdf.GetY() > lastPageItemsMaxY+6 {
 		pdf.AddPage()
 	}
 
-	pdf.Ln(2)
+	pdf.Ln(1) // Reduced from 2
 	finalY := pdf.GetY()
 
 	// Keterangan
@@ -217,10 +234,21 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	pdf.CellFormat(90, 4, "Keterangan:", "", 1, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 8)
 	pdf.MultiCell(90, 4, sanitizeLatin1(data.Keterangan), "", "L", false)
+	keteranganEndY := pdf.GetY()
+
+	// Nomor Rekening
+	if strings.TrimSpace(data.BankAccount) != "" {
+		pdf.SetY(keteranganEndY + 1)
+		pdf.SetX(10)
+		pdf.SetFont("Arial", "B", 8)
+		pdf.CellFormat(22, 4, "No. Rekening:", "", 0, "L", false, 0, "")
+		pdf.SetX(32)
+		pdf.MultiCell(88, 4, sanitizeLatin1(data.BankAccount), "", "L", false)
+		keteranganEndY = pdf.GetY()
+	}
 
 	// Summary Recap
 	pdf.SetY(finalY)
-	// Compute subtotal from line items so it exactly matches printed rows.
 	var subtotal float64
 	for _, it := range data.Items {
 		subtotal = Round2(subtotal + it.TotalPrice)
@@ -230,16 +258,29 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 
 	for idx, label := range summaryLabels {
 		pdf.SetX(125)
-		pdf.CellFormat(40, 5, label, "", 0, "R", false, 0, "")
-		pdf.CellFormat(35, 5, summaryValues[idx], "", 1, "R", false, 0, "")
+		pdf.CellFormat(40, 4, label, "", 0, "R", false, 0, "") // Height reduced from 4.5 to 4
+		pdf.CellFormat(35, 4, summaryValues[idx], "", 1, "R", false, 0, "")
+	}
+	summaryEndY := pdf.GetY()
+
+	separatorY := summaryEndY
+	if keteranganEndY > separatorY {
+		separatorY = keteranganEndY
 	}
 
-	// Signature - Absolute Positioning to avoid page push
-	pdf.SetY(pdf.GetY() + 5)
+	pdf.SetY(separatorY + 1)
+	pdf.SetLineWidth(0.3)
+	pdf.Line(10, pdf.GetY(), 200, pdf.GetY())
+	pdf.Ln(1)
+
+	// Signature Block
+	pdf.SetY(pdf.GetY() + 1) // Reduced from 2
 	pdf.SetX(130)
 	pdf.SetFont("Arial", "", 9)
 	pdf.CellFormat(60, 4, "Penanggung Jawab,", "", 1, "C", false, 0, "")
-	pdf.Ln(10)
+
+	pdf.Ln(5) // Reduced signature whitespace from 6 to 5
+
 	pdf.SetX(130)
 	pdf.SetFont("Arial", "B", 9)
 	pdf.CellFormat(60, 4, fmt.Sprintf("( %s )", sanitizeLatin1(data.Penanggungjawab)), "", 1, "C", false, 0, "")
@@ -247,11 +288,7 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	pdf.SetFont("Arial", "", 9)
 	pdf.CellFormat(60, 4, sanitizeLatin1(data.Jabatan), "", 1, "C", false, 0, "")
 
-	// Pagination
-	pdf.SetY(-10) // Move closer to bottom
-	pdf.SetFont("Arial", "I", 7)
-	pdf.CellFormat(190, 5, fmt.Sprintf("Halaman %d", pdf.PageNo()), "", 0, "R", false, 0, "")
-
+	// Output buffer
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {
 		return nil, err

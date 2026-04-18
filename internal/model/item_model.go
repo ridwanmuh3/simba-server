@@ -66,6 +66,7 @@ type InvoiceResponse struct {
 	InvoiceNumber  string    `json:"invoice_number"`
 	PONumber       string    `json:"po_number"`
 	QuoNumber      string    `json:"quo_number"`
+	HasItems       bool      `json:"has_items"`
 	CreatedAt      time.Time `json:"created_at,omitzero"`
 	UpdatedAt      time.Time `json:"updated_at,omitzero"`
 }
@@ -96,6 +97,7 @@ type InvoiceData struct {
 	Keterangan      string
 	Penanggungjawab string
 	Jabatan         string
+	BankAccount     string
 }
 type GenerateInvoiceRequest struct {
 	CompanyName    string `json:"company_name" validate:"required,min=2,max=100"`
@@ -120,6 +122,7 @@ type GenerateInvoiceRequest struct {
 	Keterangan      string `json:"keterangan" validate:"omitempty,max=500"`
 	Penanggungjawab string `json:"penanggungjawab" validate:"required,min=2,max=100"`
 	Jabatan         string `json:"jabatan" validate:"required,min=2,max=100"`
+	BankAccount     string `json:"bank_account" validate:"omitempty,max=100"`
 }
 type AddItemRequest struct {
 	Name        string     `json:"name" validate:"required,printascii,min=3,max=90"`
@@ -161,8 +164,18 @@ type DeleteItemRequest struct {
 }
 
 type DeleteStockRequest struct {
-	ID      string `param:"id" validate:"required,printascii"`
-	StockID int    `param:"stock_id" validate:"required,numeric"`
+	ID         string `param:"id" validate:"required,printascii"`
+	StockID    int    `param:"stock_id" validate:"required,numeric"`
+	ModifiedBy string `json:"-" validate:"required"`
+}
+
+type EditStockRequest struct {
+	ID         string  `param:"id" validate:"required,printascii,max=30"`
+	StockID    int     `param:"stock_id" validate:"required,numeric"`
+	Amount     float64 `json:"amount" validate:"required,numeric,gt=0"`
+	UnitPrice  float64 `json:"unit_price" validate:"required,numeric,gt=0"`
+	Supplier   string  `json:"supplier" validate:"omitempty,alphaspace,max=100"`
+	ModifiedBy string  `json:"-" validate:"required"`
 }
 
 type FindByIdItemRequest struct {
