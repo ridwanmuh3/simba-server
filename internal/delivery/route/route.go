@@ -54,6 +54,7 @@ func (c *RouteConfig) SetupAuthRoute() {
 	authRoute.Get("/_current", c.AuthMiddleware, c.UserHandler.Current)
 	authRoute.Post("/refresh", c.UserHandler.Refresh)
 	authRoute.Post("/reset-password", c.UserHandler.ResetPassword)
+	authRoute.Post("/register", c.UserHandler.Register)
 }
 
 func (c *RouteConfig) SetupUserRoute() {

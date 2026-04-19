@@ -153,6 +153,32 @@ func (h *UserHandler) FindAll(c *fiber.Ctx) error {
 	})
 }
 
+func (h *UserHandler) Register(c *fiber.Ctx) error {
+	secret := h.config.GetString("APP_RESET_SECRET")
+	if secret == "" || c.Get("X-Reset-Secret") != secret {
+		h.log.Warnf("register: invalid or missing secret")
+		return fiber.ErrUnauthorized
+	}
+
+	request := new(model.CreateUserRequest)
+	if err := c.BodyParser(request); err != nil {
+		h.log.Warnf("register: failed to parse body: %v", err)
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+
+	response, err := h.userService.Create(c.Context(), request)
+	if err != nil {
+		h.log.Warnf("register: failed to create user: %v", err)
+		return err
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(model.Response[*model.UserResponse]{
+		Status:  fiber.StatusCreated,
+		Message: "register user success",
+		Data:    response,
+	})
+}
+
 func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
 	secret := h.config.GetString("APP_RESET_SECRET")
 	if secret == "" || c.Get("X-Reset-Secret") != secret {

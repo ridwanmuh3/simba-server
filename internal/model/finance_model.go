@@ -16,23 +16,23 @@ type FinanceResponse struct {
 
 type AddFinanceRequest struct {
 	Type        string `json:"type" validate:"required,alpha"`
-	Category    string `json:"category" validate:"required,printascii,min=1"`
-	Description string `json:"description" validate:"required,printascii,min=1"`
+	Category    string `json:"category" validate:"required,min=1,max=100"`
+	Description string `json:"description" validate:"required,min=1,max=255"`
 	Amount      int    `json:"amount" validate:"required,number"`
-	ExtraNote   string `json:"extra_note,omitempty" validate:"omitempty,printascii,min=1"`
+	ExtraNote   string `json:"extra_note,omitempty" validate:"omitempty,max=255"`
 	ProofImage  string `json:"-" validate:"required"`
-	ModifiedBy  string `json:"-" validate:"required,alphaspace"`
+	ModifiedBy  string `json:"-" validate:"required,min=2,max=50"`
 }
 
 type UpdateFinanceRequest struct {
 	ID          int    `param:"id" validate:"required,number"`
 	Type        string `json:"type" validate:"required,alpha"`
-	Category    string `json:"category,omitempty" validate:"omitempty,printascii,min=1"`
-	Description string `json:"description,omitempty" validate:"omitempty,printascii,min=1"`
+	Category    string `json:"category,omitempty" validate:"omitempty,min=1,max=100"`
+	Description string `json:"description,omitempty" validate:"omitempty,min=1,max=255"`
 	Amount      int    `json:"amount,omitempty" validate:"omitempty,number"`
-	ExtraNote   string `json:"extra_note,omitempty" validate:"omitempty,printascii"`
+	ExtraNote   string `json:"extra_note,omitempty" validate:"omitempty,max=255"`
 	ProofImage  string `json:"-" validate:"omitempty"`
-	ModifiedBy  string `json:"-" validate:"required,alphaspace"`
+	ModifiedBy  string `json:"-" validate:"required,min=2,max=50"`
 }
 
 type DeleteFinanceRequest struct {

@@ -82,9 +82,9 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		// totalPrice tetap dari item (karena itu agregat resmi)
 		currentTotalPrice = item.TotalPrice
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
-		// first transaction
-		previousStock = 0
-		currentTotalPrice = 0
+		// no tracking yet — use item master as baseline
+		previousStock = item.Stock
+		currentTotalPrice = item.TotalPrice
 	} else {
 		return nil, exception.InternalServerError
 	}
@@ -114,11 +114,11 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		tr.TotalPrice = addedTotal
 
 	case "OUT":
-		if previousStock < request.Amount {
-			return nil, fiber.NewError(fiber.StatusBadRequest, "insufficient stock")
-		}
 		if previousStock == 0 {
 			return nil, fiber.NewError(fiber.StatusBadRequest, "invalid stock state")
+		}
+		if util.Round4(previousStock) < util.Round4(request.Amount) {
+			return nil, fiber.NewError(fiber.StatusBadRequest, "insufficient stock")
 		}
 
 		avg := util.Round4(currentTotalPrice / previousStock)

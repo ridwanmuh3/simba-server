@@ -125,13 +125,13 @@ type GenerateInvoiceRequest struct {
 	BankAccount     string `json:"bank_account" validate:"omitempty,max=100"`
 }
 type AddItemRequest struct {
-	Name        string     `json:"name" validate:"required,printascii,min=3,max=90"`
-	Category    string     `json:"category" validate:"required,alphaspace,min=3,max=30"`
+	Name        string     `json:"name" validate:"required,min=1,max=90"`
+	Category    string     `json:"category" validate:"required,min=1,max=50"`
 	Stock       float64    `json:"stock" validate:"required,numeric,gt=0"`
-	MeasureUnit string     `json:"measure_unit" validate:"required,printascii,min=1,max=30"`
+	MeasureUnit string     `json:"measure_unit" validate:"required,min=1,max=30"`
 	UnitPrice   float64    `json:"unit_price" validate:"required,numeric,gt=0"`
 	DateAdded   *time.Time `json:"date_added,omitempty" validate:"omitempty"`
-	ModifiedBy  string     `json:"-" validate:"required,alphaspace,min=2,max=50"`
+	ModifiedBy  string     `json:"-" validate:"required,min=2,max=50"`
 }
 
 type AddItemBatchRequest struct {
@@ -140,23 +140,23 @@ type AddItemBatchRequest struct {
 
 type UpdateItemRequest struct {
 	ID           string     `param:"id,omitempty" validate:"omitempty,printascii,max=30"`
-	Name         string     `json:"name,omitempty" validate:"omitempty,printascii,min=3,max=90"`
-	Category     string     `json:"category,omitempty" validate:"omitempty,alphaspace,min=3,max=30"`
-	MeasureUnit  string     `json:"measure_unit,omitempty" validate:"omitempty,printascii,min=1,max=30"`
-	UnitPrice    float64    `json:"unit_price,omitempty" validate:"omitempty,number,gt=0"`
-	Stock        float64    `json:"stock" validate:"required,numeric,gt=0"`
+	Name         string     `json:"name,omitempty" validate:"omitempty,min=1,max=90"`
+	Category     string     `json:"category,omitempty" validate:"omitempty,min=1,max=50"`
+	MeasureUnit  string     `json:"measure_unit,omitempty" validate:"omitempty,min=1,max=30"`
+	UnitPrice    float64    `json:"unit_price,omitempty" validate:"omitempty,numeric,gt=0"`
+	Stock        float64    `json:"stock" validate:"omitempty,numeric,gt=0"`
 	InitialStock *float64   `json:"initial_stock,omitempty" validate:"omitempty,numeric,gte=0"`
 	DateAdded    *time.Time `json:"date_added,omitempty" validate:"omitempty"`
-	ModifiedBy   string     `json:"-" validate:"required,alphaspace,min=2,max=50"`
+	ModifiedBy   string     `json:"-" validate:"required,min=2,max=50"`
 }
 
 type UpdateItemStockRequest struct {
 	ID         string  `param:"id,omitempty" validate:"omitempty,printascii,max=30"`
 	Type       string  `json:"type" validate:"required,alpha,min=2,max=10"`
-	Amount     float64 `json:"amount" validate:"required,numeric,min=0"`
-	UnitPrice  float64 `json:"unit_price" validate:"required,numeric,gt=1"`
-	Supplier   string  `json:"supplier" validate:"omitempty,alphaspace,max=100"`
-	ModifiedBy string  `json:"-" validate:"required,alphaspace,min=2,max=50"`
+	Amount     float64 `json:"amount" validate:"required,numeric,gt=0"`
+	UnitPrice  float64 `json:"unit_price" validate:"required,numeric,gte=1"`
+	Supplier   string  `json:"supplier" validate:"omitempty,max=100"`
+	ModifiedBy string  `json:"-" validate:"required,min=2,max=50"`
 }
 
 type DeleteItemRequest struct {
@@ -174,8 +174,8 @@ type EditStockRequest struct {
 	StockID    int     `param:"stock_id" validate:"required,numeric"`
 	Amount     float64 `json:"amount" validate:"required,numeric,gt=0"`
 	UnitPrice  float64 `json:"unit_price" validate:"required,numeric,gt=0"`
-	Supplier   string  `json:"supplier" validate:"omitempty,alphaspace,max=100"`
-	ModifiedBy string  `json:"-" validate:"required"`
+	Supplier   string  `json:"supplier" validate:"omitempty,max=100"`
+	ModifiedBy string  `json:"-" validate:"required,min=2,max=50"`
 }
 
 type FindByIdItemRequest struct {
