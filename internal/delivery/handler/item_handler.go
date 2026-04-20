@@ -57,6 +57,7 @@ type InvoiceService interface {
 	SaveInvoice(ctx context.Context, request *model.GenerateInvoiceRequest, summary *model.InvoiceSummary) error
 	FindAllInvoices(ctx context.Context, request *model.FindAllInvoicesRequest) ([]model.InvoiceResponse, int64, error)
 	FindInvoiceByID(ctx context.Context, id uint) (*model.InvoiceData, error)
+	DeleteInvoice(ctx context.Context, id uint) error
 }
 
 type SettingService interface {
@@ -710,4 +711,23 @@ func (h *ItemHandler) DownloadInvoicePDF(c *fiber.Ctx) error {
 	c.Set("Content-Type", "application/pdf")
 	c.Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, filename))
 	return c.Send(pdfBuffer.Bytes())
+}
+
+func (h *ItemHandler) DeleteInvoice(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil || id == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid invoice id")
+	}
+
+	if err := h.invoiceService.DeleteInvoice(c.Context(), uint(id)); err != nil {
+		h.log.Warnf("failed to delete invoice %d: %v", id, err)
+		return err
+	}
+
+	return c.JSON(model.Response[bool]{
+		Status:  fiber.StatusOK,
+		Message: "delete invoice success",
+		Data:    true,
+	})
 }

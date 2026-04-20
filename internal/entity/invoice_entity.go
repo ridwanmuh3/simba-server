@@ -10,8 +10,8 @@ type Invoice struct {
 	CompanyContact  string `gorm:"type:varchar(50);not null"`
 	CompanyAddress  string `gorm:"type:text;not null"`
 	InvoiceNumber   string `gorm:"type:varchar(100);not null;uniqueIndex"`
-	PONumber        string `gorm:"type:varchar(100)"`
-	QuoNumber       string `gorm:"type:varchar(100)"`
+	PONumber        string `gorm:"type:varchar(100);uniqueIndex:idx_invoice_po_number,where:po_number <> ''"`
+	QuoNumber       string `gorm:"type:varchar(100);uniqueIndex:idx_invoice_quo_number,where:quo_number <> ''"`
 	ReceiverName    string `gorm:"type:varchar(255)"`
 	ReceiverAddress string `gorm:"type:text"`
 	InvoiceDate     string `gorm:"type:varchar(100)"`

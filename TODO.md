@@ -15,7 +15,8 @@ Dokumen ini berisi daftar pembaruan sistem yang direncanakan, dikategorikan berd
 
 ### Data & Validation
 
-- [ ] **CSV Import Validation** — Perkuat validasi saat import CSV: deteksi duplikat nama bahan, validasi format angka, dan batasi jumlah baris per import (misal: max 500)
+- [x] **CSV Import Row Limit** — Dibatasi max 500 baris untuk mencegah DoS (v1.0.0)
+- [ ] **CSV Import Validation** — Perkuat validasi: deteksi duplikat nama bahan, validasi format angka
 - [ ] **Date Format Validation** — Standarisasi validasi format tanggal pada semua endpoint yang menerima parameter date (gunakan `datetime=2006-01-02T15:04:05Z07:00`)
 - [ ] **Pagination Default & Guard** — Pastikan semua endpoint list memiliki default `page=1, size=10` dan max `size=100` untuk mencegah query berlebihan
 

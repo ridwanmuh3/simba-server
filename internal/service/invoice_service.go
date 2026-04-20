@@ -18,6 +18,23 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/util"
 )
 
+func isDuplicateKeyError(err error) (bool, string) {
+	msg := err.Error()
+	if !strings.Contains(msg, "23505") && !strings.Contains(msg, "duplicate key") {
+		return false, ""
+	}
+	switch {
+	case strings.Contains(msg, "invoice_number"):
+		return true, "nomor invoice sudah digunakan"
+	case strings.Contains(msg, "po_number"):
+		return true, "nomor PO sudah digunakan"
+	case strings.Contains(msg, "quo_number"):
+		return true, "nomor quotation sudah digunakan"
+	default:
+		return true, "nomor dokumen sudah digunakan"
+	}
+}
+
 type InvoiceService struct {
 	db       *gorm.DB
 	log      *zap.SugaredLogger
@@ -53,12 +70,7 @@ func (s *InvoiceService) GetInvoiceItems(ctx context.Context, request *model.Get
 			s.log.Errorf("failed to parse date from: %v", err)
 			return nil, exception.InternalServerError
 		}
-		// Pastikan DateFrom berada di titik awal hari (00:00:00) 
-		// jika ada kemungkinan frontend mengirim waktu acak
-		loc, _ := time.LoadLocation("Asia/Jakarta")
-		parsedFrom = parsedFrom.In(loc)
-		startOfDay := time.Date(parsedFrom.Year(), parsedFrom.Month(), parsedFrom.Day(), 0, 0, 0, 0, loc)
-		query = query.Where("created_at >= ?", startOfDay.UTC())
+		query = query.Where("created_at >= ?", parsedFrom.UTC())
 	}
 
 	if request.DateTo != "" {
@@ -67,12 +79,7 @@ func (s *InvoiceService) GetInvoiceItems(ctx context.Context, request *model.Get
 			s.log.Errorf("failed to parse date to: %v", err)
 			return nil, exception.InternalServerError
 		}
-		
-		// Memaksa DateTo berada di titik paling akhir hari tersebut (23:59:59.999999999)
-		loc, _ := time.LoadLocation("Asia/Jakarta")
-		parsedTo = parsedTo.In(loc)
-		endOfDay := time.Date(parsedTo.Year(), parsedTo.Month(), parsedTo.Day(), 23, 59, 59, 999999999, loc)
-		query = query.Where("created_at <= ?", endOfDay.UTC())
+		query = query.Where("created_at <= ?", parsedTo.UTC())
 	}
 
 	if err := query.Order("item_id ASC").Limit(500).Find(&stocks).Error; err != nil {
@@ -139,6 +146,9 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 	}
 
 	if err := db.Create(&invoice).Error; err != nil {
+		if ok, msg := isDuplicateKeyError(err); ok {
+			return fiber.NewError(fiber.StatusConflict, msg)
+		}
 		s.log.Errorf("failed to save invoice record: %v", err)
 		return exception.InternalServerError
 	}
@@ -229,12 +239,7 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 			s.log.Errorf("failed to parse invoice start date: %v", err)
 			return nil, 0, exception.InternalServerError
 		}
-		// Pastikan DateFrom berada di titik awal hari (00:00:00) 
-		// jika ada kemungkinan frontend mengirim waktu acak
-		loc, _ := time.LoadLocation("Asia/Jakarta")
-		parsedFrom = parsedFrom.In(loc)
-		startOfDay := time.Date(parsedFrom.Year(), parsedFrom.Month(), parsedFrom.Day(), 0, 0, 0, 0, loc)
-		query = query.Where("created_at >= ?", startOfDay.UTC())
+		query = query.Where("created_at >= ?", parsedFrom.UTC())
 	}
 
 	if request.EndDate != "" {
@@ -243,11 +248,7 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 			s.log.Errorf("failed to parse invoice end date: %v", err)
 			return nil, 0, exception.InternalServerError
 		}
-		// Memaksa DateTo berada di titik paling akhir hari tersebut (23:59:59.999999999)
-		loc, _ := time.LoadLocation("Asia/Jakarta")
-		parsedTo = parsedTo.In(loc)
-		endOfDay := time.Date(parsedTo.Year(), parsedTo.Month(), parsedTo.Day(), 23, 59, 59, 999999999, loc)
-		query = query.Where("created_at <= ?", endOfDay.UTC())
+		query = query.Where("created_at <= ?", parsedTo.UTC())
 	}
 
 	var total int64
@@ -315,4 +316,29 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 	}
 
 	return responses, total, nil
+}
+
+func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint) error {
+	db := s.db.WithContext(ctx)
+
+	var count int64
+	if err := db.Model(&entity.Invoice{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		s.log.Errorf("failed to check invoice %d: %v", id, err)
+		return exception.InternalServerError
+	}
+	if count == 0 {
+		return fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("invoice_id = ?", id).Delete(&entity.InvoiceItem{}).Error; err != nil {
+			s.log.Errorf("failed to delete invoice items for invoice %d: %v", id, err)
+			return exception.InternalServerError
+		}
+		if err := tx.Delete(&entity.Invoice{}, id).Error; err != nil {
+			s.log.Errorf("failed to delete invoice %d: %v", id, err)
+			return exception.InternalServerError
+		}
+		return nil
+	})
 }

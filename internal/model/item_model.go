@@ -20,8 +20,8 @@ type StockResponse struct {
 	ID            int          `json:"id,omitempty"`
 	Type          string       `json:"type,omitempty"`
 	Amount        float64      `json:"amount,omitempty"`
-	PreviousStock float64      `json:"previous_stock,omitempty"`
-	NewStock      float64      `json:"new_stock,omitempty"`
+	PreviousStock float64      `json:"previous_stock"`
+	NewStock      float64      `json:"new_stock"`
 	UnitPrice     float64      `json:"unit_price,omitempty"`
 	TotalPrice    float64      `json:"total_price,omitempty"`
 	Supplier      string       `json:"supplier,omitempty"`

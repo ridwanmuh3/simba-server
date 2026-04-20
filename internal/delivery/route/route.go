@@ -85,6 +85,7 @@ func (c *RouteConfig) SetupItemRoute() {
 	itemRoute.Delete("/:id", c.ItemHandler.Delete)
 	itemRoute.Post("/invoice", c.ItemHandler.GetInvoiceItems)
 	itemRoute.Get("/invoices", c.ItemHandler.GetInvoiceHistory)
+	itemRoute.Delete("/invoices/:id", c.ItemHandler.DeleteInvoice)
 	itemRoute.Get("/invoices/:id/pdf", c.ItemHandler.DownloadInvoicePDF)
 	itemRoute.Get("/export", c.ItemHandler.ExportItems)
 	itemRoute.Get("/stocks", c.ItemHandler.FindAllStocks)

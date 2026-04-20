@@ -241,9 +241,9 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 		pdf.SetY(keteranganEndY + 1)
 		pdf.SetX(10)
 		pdf.SetFont("Arial", "B", 8)
-		pdf.CellFormat(22, 4, "No. Rekening:", "", 0, "L", false, 0, "")
-		pdf.SetX(32)
-		pdf.MultiCell(88, 4, sanitizeLatin1(data.BankAccount), "", "L", false)
+		pdf.CellFormat(25, 4, "No. Rekening:", "", 0, "L", false, 0, "")
+		pdf.SetFont("Arial", "", 8)
+		pdf.CellFormat(90, 4, sanitizeLatin1(data.BankAccount), "", 1, "L", false, 0, "")
 		keteranganEndY = pdf.GetY()
 	}
 
@@ -279,7 +279,7 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	pdf.SetFont("Arial", "", 9)
 	pdf.CellFormat(60, 4, "Penanggung Jawab,", "", 1, "C", false, 0, "")
 
-	pdf.Ln(5) // Reduced signature whitespace from 6 to 5
+	pdf.Ln(18) // Space for signature
 
 	pdf.SetX(130)
 	pdf.SetFont("Arial", "B", 9)
