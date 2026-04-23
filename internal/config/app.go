@@ -1,11 +1,14 @@
 package config
 
 import (
+	"time"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/contrib/fiberzap/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/helmet"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -34,8 +37,15 @@ func Bootstrap(config *BootstrapConfig) {
 	dashboardRepository := repository.NewDashboardRepository()
 	settingRepository := repository.NewSettingRepository()
 
+	jwtSecret := []byte(config.Config.GetString("JWT_SECRET"))
+	// RFC 7518 §3.2: HMAC-SHA256 key MUST be ≥ 256 bits (32 bytes).
+	// An empty or short secret allows trivial token forgery.
+	if len(jwtSecret) < 32 {
+		panic("JWT_SECRET must be at least 32 bytes (256 bits) — set a strong random value in your environment")
+	}
+
 	// services
-	userService := service.NewUserService(config.DB, config.Log, config.Validate, userRepository)
+	userService := service.NewUserService(config.DB, config.Log, config.Validate, userRepository, jwtSecret)
 	itemService := service.NewItemService(config.DB, config.Log, config.Validate, itemRepository)
 	stockService := service.NewStockService(config.DB, config.Log, config.Validate, itemRepository)
 	invoiceService := service.NewInvoiceService(config.DB, config.Log, config.Validate)
@@ -50,7 +60,7 @@ func Bootstrap(config *BootstrapConfig) {
 	dashboardHandler := handler.NewDashboardHandler(config.Config, config.Log, dashboardService)
 	settingHandler := handler.NewSettingHandler(config.Config, config.Log, config.Validate, settingService)
 
-	authMiddleware := middleware.NewAuthMiddleware(config.Log, userService)
+	authMiddleware := middleware.NewAuthMiddleware(config.Log, jwtSecret)
 
 	routeConfig := &route.RouteConfig{
 		App:              config.App,
@@ -82,4 +92,27 @@ func SetupGlobalMiddlewares(config *BootstrapConfig) {
 		AllowOrigins:     allowedOrigins,
 	}))
 
+	// Global rate limit: 200 req/min per IP.
+	config.App.Use(limiter.New(limiter.Config{
+		Max:        200,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return fiber.NewError(fiber.StatusTooManyRequests, "too many requests")
+		},
+	}))
+
+	// Strict rate limit on auth endpoints: 10 req/min per IP (brute-force guard).
+	config.App.Use("/api/auth", limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return fiber.NewError(fiber.StatusTooManyRequests, "too many requests")
+		},
+	}))
 }

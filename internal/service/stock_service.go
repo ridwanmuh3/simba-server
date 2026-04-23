@@ -124,7 +124,7 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		avg := util.Round4(currentTotalPrice / previousStock)
 
 		newStock := util.Round4(previousStock - request.Amount)
-		deduction := util.Round2(avg * request.Amount)                        // MAC (inventory)
+		deduction := util.Round2(avg * request.Amount)               // MAC (inventory)
 		lineTotal := util.Round2(request.Amount * request.UnitPrice) // invoice
 
 		item.Stock = newStock
@@ -141,8 +141,8 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		return nil, fiber.NewError(fiber.StatusBadRequest, "stock cannot be negative")
 	}
 
-	// 6. SAVE ITEM
-	if err := s.itemRepository.Update(tx, item, item.ID); err != nil {
+	// 6. SAVE ITEM (use Save not Updates — Updates skips zero-value fields e.g. stock=0)
+	if err := tx.Save(item).Error; err != nil {
 		return nil, exception.InternalServerError
 	}
 
@@ -246,28 +246,30 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 			totalPrice = util.Round2(totalPrice + added)
 
 			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
-
 		case "OUT":
-			if prev < tracks[i].Amount {
-				return nil, fiber.NewError(fiber.StatusBadRequest, "edit would result in invalid stock history")
+			if prev <= 0 {
+				tracks[i].TotalPrice = 0
+				runningStock = 0
+				break
+			}
+
+			actualAmount := tracks[i].Amount
+			if actualAmount > prev {
+				actualAmount = prev
 			}
 
 			avg := util.Round4(totalPrice / prev)
 
-			deduction := util.Round2(avg * tracks[i].Amount)
-			lineTotal := util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
+			deduction := util.Round2(avg * actualAmount)
+			lineTotal := util.Round2(actualAmount * tracks[i].UnitPrice)
 
-			runningStock = util.Round4(prev - tracks[i].Amount)
+			runningStock = util.Round4(prev - actualAmount)
 			totalPrice = util.Round2(totalPrice - deduction)
 
 			tracks[i].TotalPrice = lineTotal
 		}
 
 		tracks[i].NewStock = util.Round4(runningStock)
-
-		if runningStock < 0 {
-			return nil, fiber.NewError(fiber.StatusBadRequest, "edit would cause stock to go negative")
-		}
 
 		if tracks[i].ID == uint(request.StockID) {
 			updatedTarget = &tracks[i]
@@ -388,25 +390,28 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
 
 		case "OUT":
-			if prev < tracks[i].Amount {
-				return false, fiber.NewError(fiber.StatusBadRequest, "invalid stock history")
+			if prev <= 0 {
+				// stok sudah habis → tidak ada yang bisa dikurangi
+				tracks[i].NewStock = 0
+				tracks[i].TotalPrice = 0
+				return true, nil
+			}
+
+			// ambil amount yang valid (tidak boleh lebih dari stok)
+			actualAmount := tracks[i].Amount
+			if actualAmount > prev {
+				actualAmount = prev
 			}
 
 			avg := util.Round4(totalPrice / prev)
 
-			deduction := util.Round2(avg * tracks[i].Amount)
-			lineTotal := util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
+			deduction := util.Round2(avg * actualAmount)
+			lineTotal := util.Round2(actualAmount * tracks[i].UnitPrice)
 
-			runningStock = util.Round4(prev - tracks[i].Amount)
+			runningStock = util.Round4(prev - actualAmount)
 			totalPrice = util.Round2(totalPrice - deduction)
 
 			tracks[i].TotalPrice = lineTotal
-		}
-
-		tracks[i].NewStock = util.Round4(runningStock)
-
-		if runningStock < 0 {
-			return false, fiber.NewError(fiber.StatusBadRequest, "stock became negative")
 		}
 	}
 

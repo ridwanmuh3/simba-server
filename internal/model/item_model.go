@@ -116,6 +116,9 @@ type GenerateInvoiceRequest struct {
 	DateFrom string `json:"date_from"`
 	DateTo   string `json:"date_to"`
 
+	// StockIDs: if provided, filter by these stock tracking IDs instead of date range.
+	StockIDs []int `json:"stock_ids" validate:"omitempty"`
+
 	// StockType: "OUT" (default) or "IN" — determines which stock tab context to pull.
 	StockType string `json:"stock_type" validate:"omitempty,oneof=IN OUT"`
 
@@ -200,9 +203,10 @@ type FindAllStocksRequest struct {
 }
 
 type GetInvoiceItemsRequest struct {
-	DateFrom  string `query:"date_from,omitempty" validate:"omitempty,max=50"`
-	DateTo    string `query:"date_to,omitempty" validate:"omitempty,max=50"`
-	StockType string `query:"stock_type,omitempty" validate:"omitempty,oneof=IN OUT"`
+	DateFrom  string `json:"date_from,omitempty" validate:"omitempty,max=50"`
+	DateTo    string `json:"date_to,omitempty" validate:"omitempty,max=50"`
+	StockType string `json:"stock_type,omitempty" validate:"omitempty,oneof=IN OUT"`
+	StockIDs  []int  `json:"stock_ids,omitempty" validate:"omitempty"`
 }
 
 type FindAllInvoicesRequest struct {

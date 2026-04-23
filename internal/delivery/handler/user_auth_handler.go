@@ -1,12 +1,18 @@
 package handler
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 
 	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
+	"github.com/ridwanmuh3/simba-server/internal/exception"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/service"
 )
@@ -42,6 +48,18 @@ func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string) {
 		Secure:   isSecureRequest,
 		SameSite: sameSite,
 	})
+
+	// Non-HttpOnly cookie so the frontend can read the expiry timestamp
+	// and schedule a proactive refresh before the JWT expires.
+	c.Cookie(&fiber.Cookie{
+		Name:     "token_exp",
+		Value:    strconv.FormatInt(now.Add(service.AccessTokenTTL).Unix(), 10),
+		Path:     "/",
+		Expires:  now.Add(service.AccessTokenTTL),
+		HTTPOnly: false,
+		Secure:   isSecureRequest,
+		SameSite: sameSite,
+	})
 }
 
 func clearAuthCookies(c *fiber.Ctx) {
@@ -69,6 +87,17 @@ func clearAuthCookies(c *fiber.Ctx) {
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 		HTTPOnly: true,
+		Secure:   isSecureRequest,
+		SameSite: sameSite,
+	})
+
+	c.Cookie(&fiber.Cookie{
+		Name:     "token_exp",
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+		HTTPOnly: false,
 		Secure:   isSecureRequest,
 		SameSite: sameSite,
 	})
@@ -157,11 +186,118 @@ func (h *UserHandler) Current(c *fiber.Ctx) error {
 		ID:       response.ID,
 		Fullname: response.Fullname,
 		Role:     response.Role,
+		Avatar:   response.Avatar,
 	}
 
 	return c.JSON(model.Response[model.Auth]{
 		Status:  fiber.StatusOK,
 		Message: "get current auth user success",
 		Data:    authData,
+	})
+}
+
+func (h *UserHandler) GetProfile(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
+	response, err := h.userService.FindById(c.Context(), &model.FindByIdUserRequest{ID: auth.ID})
+	if err != nil {
+		h.log.Warnf("failed to get profile: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[*model.UserResponse]{
+		Status:  fiber.StatusOK,
+		Message: "get profile success",
+		Data:    response,
+	})
+}
+
+func (h *UserHandler) UpdateProfile(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
+	request := new(model.UpdateProfileRequest)
+	if err := c.BodyParser(request); err != nil {
+		h.log.Warnf("failed to parse profile update body: %v", err)
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	request.AuthID = auth.ID
+
+	response, err := h.userService.UpdateProfile(c.Context(), request)
+	if err != nil {
+		h.log.Warnf("failed to update profile: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[*model.UserResponse]{
+		Status:  fiber.StatusOK,
+		Message: "profile updated",
+		Data:    response,
+	})
+}
+
+func (h *UserHandler) UpdateAvatar(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
+	currentUser, err := h.userService.FindById(c.Context(), &model.FindByIdUserRequest{ID: auth.ID})
+	if err != nil {
+		h.log.Warnf("failed to get current user for avatar update: %v", err)
+		return err
+	}
+
+	avatarFile, err := c.FormFile("avatar")
+	if err != nil {
+		h.log.Warnf("failed to get avatar file: %v", err)
+		return exception.InvalidUploadedFileError
+	}
+
+	ext := strings.ToLower(filepath.Ext(avatarFile.Filename))
+	if !slices.Contains([]string{".png", ".jpg", ".jpeg"}, ext) {
+		h.log.Warnf("invalid avatar file format: %s", ext)
+		return exception.InvalidFileFormatError
+	}
+
+	const maxSize = int64(5 * 1024 * 1024)
+	if avatarFile.Size > maxSize {
+		h.log.Warnf("avatar file too large: %d bytes", avatarFile.Size)
+		return exception.ExceedMaximumFileSizeError
+	}
+
+	uploadDir := filepath.Join("uploads", "avatars")
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		h.log.Warnf("failed to create avatars directory: %v", err)
+		return exception.InternalServerError
+	}
+
+	fileName := uuid.New().String() + ext
+	filePath := filepath.Join(uploadDir, fileName)
+
+	if err := c.SaveFile(avatarFile, filePath); err != nil {
+		h.log.Warnf("failed to save avatar file: %v", err)
+		return exception.InternalServerError
+	}
+
+	newAvatarPath := "/uploads/avatars/" + fileName
+
+	response, err := h.userService.UpdateAvatar(c.Context(), auth.ID, newAvatarPath)
+	if err != nil {
+		h.log.Warnf("failed to update avatar in db: %v", err)
+		if removeErr := os.Remove(filePath); removeErr != nil {
+			h.log.Warnf("failed to cleanup orphaned avatar: %v", removeErr)
+		}
+		return err
+	}
+
+	if currentUser.Avatar != "" {
+		oldFileName := filepath.Base(currentUser.Avatar)
+		oldFilePath := filepath.Join("uploads", "avatars", oldFileName)
+		if removeErr := os.Remove(oldFilePath); removeErr != nil && !os.IsNotExist(removeErr) {
+			h.log.Warnf("failed to remove old avatar: %v", removeErr)
+		}
+	}
+
+	return c.JSON(model.Response[*model.UserResponse]{
+		Status:  fiber.StatusOK,
+		Message: "avatar updated",
+		Data:    response,
 	})
 }

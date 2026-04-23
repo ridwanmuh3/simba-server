@@ -64,22 +64,26 @@ func (s *InvoiceService) GetInvoiceItems(ctx context.Context, request *model.Get
 	}
 	query := db.Model(new(entity.StockTracking)).Preload("Item").Where("type = ?", stockType)
 
-	if request.DateFrom != "" {
-		parsedFrom, err := time.Parse(time.RFC3339Nano, request.DateFrom)
-		if err != nil {
-			s.log.Errorf("failed to parse date from: %v", err)
-			return nil, exception.InternalServerError
+	if len(request.StockIDs) > 0 {
+		query = query.Where("id IN ?", request.StockIDs)
+	} else {
+		if request.DateFrom != "" {
+			parsedFrom, err := time.Parse(time.RFC3339Nano, request.DateFrom)
+			if err != nil {
+				s.log.Errorf("failed to parse date from: %v", err)
+				return nil, exception.InternalServerError
+			}
+			query = query.Where("created_at >= ?", parsedFrom.UTC())
 		}
-		query = query.Where("created_at >= ?", parsedFrom.UTC())
-	}
 
-	if request.DateTo != "" {
-		parsedTo, err := time.Parse(time.RFC3339Nano, request.DateTo)
-		if err != nil {
-			s.log.Errorf("failed to parse date to: %v", err)
-			return nil, exception.InternalServerError
+		if request.DateTo != "" {
+			parsedTo, err := time.Parse(time.RFC3339Nano, request.DateTo)
+			if err != nil {
+				s.log.Errorf("failed to parse date to: %v", err)
+				return nil, exception.InternalServerError
+			}
+			query = query.Where("created_at <= ?", parsedTo.UTC())
 		}
-		query = query.Where("created_at <= ?", parsedTo.UTC())
 	}
 
 	if err := query.Order("item_id ASC").Limit(500).Find(&stocks).Error; err != nil {

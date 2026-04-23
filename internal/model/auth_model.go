@@ -10,6 +10,7 @@ type Auth struct {
 	ID           int    `json:"id"`
 	Fullname     string `json:"fullname"`
 	Role         string `json:"role"`
+	Avatar       string `json:"avatar,omitempty"`
 	Token        string `json:"-"`
 	RefreshToken string `json:"-"`
 }
@@ -35,5 +36,5 @@ type LogoutUserRequest struct {
 }
 
 type VerifyUserRequest struct {
-	Token string `validate:"required,max=255"`
+	Token string `validate:"required,max=2048"`
 }

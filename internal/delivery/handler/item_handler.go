@@ -558,6 +558,7 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		DateFrom:  request.DateFrom,
 		DateTo:    request.DateTo,
 		StockType: stockType,
+		StockIDs:  request.StockIDs,
 	}
 
 	summary, err := h.invoiceService.GetInvoiceItems(c.Context(), invoiceItemsReq)

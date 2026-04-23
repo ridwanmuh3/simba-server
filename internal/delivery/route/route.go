@@ -55,6 +55,9 @@ func (c *RouteConfig) SetupAuthRoute() {
 	authRoute.Post("/refresh", c.UserHandler.Refresh)
 	authRoute.Post("/reset-password", c.UserHandler.ResetPassword)
 	authRoute.Post("/register", c.UserHandler.Register)
+	authRoute.Get("/profile", c.AuthMiddleware, c.UserHandler.GetProfile)
+	authRoute.Put("/profile", c.AuthMiddleware, c.UserHandler.UpdateProfile)
+	authRoute.Post("/profile/avatar", c.AuthMiddleware, c.UserHandler.UpdateAvatar)
 }
 
 func (c *RouteConfig) SetupUserRoute() {

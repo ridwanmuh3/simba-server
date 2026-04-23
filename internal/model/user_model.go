@@ -7,6 +7,7 @@ type UserResponse struct {
 	Username   string    `json:"username,omitempty"`
 	Fullname   string    `json:"fullname,omitempty"`
 	Role       string    `json:"role,omitempty"`
+	Avatar     string    `json:"avatar,omitempty"`
 	IsActive   bool      `json:"is_active,omitempty"`
 	LastActive time.Time `json:"last_active,omitzero"`
 	CreatedAt  time.Time `json:"created_at,omitzero"`
@@ -50,4 +51,11 @@ type FindAllUserRequest struct {
 	Fullname string `query:"fullname,omitempty" validate:"omitempty,max=30"`
 	Page     int    `query:"page,omitempty" validate:"omitempty,min=1"`
 	Size     int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
+}
+
+type UpdateProfileRequest struct {
+	AuthID      int    `json:"-" validate:"required,numeric,min=1"`
+	Fullname    string `json:"fullname,omitempty" validate:"omitempty,min=2,max=50"`
+	OldPassword string `json:"old_password,omitempty" validate:"omitempty,min=4,max=30"`
+	NewPassword string `json:"new_password,omitempty" validate:"omitempty,min=4,max=30"`
 }

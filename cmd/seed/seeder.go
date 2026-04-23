@@ -20,7 +20,7 @@ func main() {
 	validate := config.NewValidator(viperConfig)
 
 	userRepo := repository.NewUserRepository()
-	userService := service.NewUserService(db, log, validate, userRepo)
+	userService := service.NewUserService(db, log, validate, userRepo, []byte(viperConfig.GetString("JWT_SECRET")))
 
 	// ──────────────────────────────────────────────
 	// 1. Seed Users

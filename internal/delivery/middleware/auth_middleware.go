@@ -6,23 +6,37 @@ import (
 
 	"github.com/ridwanmuh3/simba-server/internal/exception"
 	"github.com/ridwanmuh3/simba-server/internal/model"
-	"github.com/ridwanmuh3/simba-server/internal/service"
+	"github.com/ridwanmuh3/simba-server/internal/util"
 )
 
-func NewAuthMiddleware(logger *zap.SugaredLogger, userService *service.UserService) fiber.Handler {
+// NewAuthMiddleware validates the JWT access token from the HttpOnly cookie.
+// No database roundtrip — claims are verified cryptographically.
+func NewAuthMiddleware(logger *zap.SugaredLogger, jwtSecret []byte) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		request := &model.VerifyUserRequest{
-			Token: c.Cookies("token", "NOT_FOUND"),
-		}
-
-		auth, err := userService.Verify(c.UserContext(), request)
-		if err != nil {
-			logger.Warnf("failed to find user by token: %v", err)
+		token := c.Cookies("token", "")
+		if token == "" {
 			return exception.UserUnauthorizedError
 		}
 
-		logger.Debugf("user: %v", auth.Fullname)
-		c.Locals("auth", auth)
+		// Reject oversized tokens before any parsing work — prevents an attacker
+		// from forcing repeated HMAC work with artificially large cookie values.
+		if len(token) > util.MaxTokenBytes {
+			logger.Warnf("rejected oversized token cookie (%d bytes)", len(token))
+			return exception.UserUnauthorizedError
+		}
+
+		claims, err := util.ParseJWT(jwtSecret, token)
+		if err != nil {
+			logger.Warnf("JWT validation failed: %v", err)
+			return exception.UserUnauthorizedError
+		}
+
+		logger.Debugf("authenticated user id %d", claims.UserID)
+		c.Locals("auth", &model.Auth{
+			ID:       claims.UserID,
+			Fullname: claims.Fullname,
+			Role:     claims.Role,
+		})
 		return c.Next()
 	}
 }

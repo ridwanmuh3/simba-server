@@ -1,26 +1,2683 @@
 openapi: 3.0.4
 info:
-  title: SIMBA Api Server
-  description: Optional multiline or single-line description in [CommonMark](http://commonmark.org/help/) or HTML.
-  version: 0.1.9
+  title: SIMBA API Server
+  description: |
+    ## SIMBA — Budget & Goods Management Information System
+
+    Backend API for **Satuan Pelayanan Pemenuhan Gizi (SPPG)** — a nutrition fulfillment unit
+    under the **Makan Bergizi Gratis (MBG)** free nutritious meals program.
+
+    ### Core Features
+    - **Authentication** — JWT-based login with refresh token rotation
+    - **User Management** — Role-Based Access Control (RBAC) with Super Admin and Admin roles
+    - **Item Management** — Inventory CRUD with stock tracking (IN/OUT transactions)
+    - **Finance Management** — Expense/income recording with proof image upload
+    - **Invoice Generation** — PDF invoice generation from stock transaction data
+    - **Dashboard** — Aggregate analytics and monthly budget statistics
+    - **Settings** — Company profile and document sequence configuration
+
+    ### Authentication Flow
+    1. `POST /api/auth/login` → receives `token` (HttpOnly cookie, 30min TTL)
+       and `refresh_token` (HttpOnly cookie, 7-day TTL, scoped to `/api/auth`)
+    2. All protected routes require valid `token` cookie
+    3. `POST /api/auth/refresh` → rotates both cookies using the refresh token
+    4. `DELETE /api/auth/logout` → clears both cookies
+
+    ### Rate Limits
+    - Global: **200 req/min** per IP
+    - Auth endpoints: **10 req/min** per IP (brute-force protection)
+
+    ### Roles
+    | Role | Access |
+    |------|--------|
+    | `Super Admin` | Full access including user management |
+    | `Admin` | Items, finances, dashboard, settings |
+  version: 1.0.0
+  contact:
+    email: ridwanmuhraihan@gmail.com
 
 servers:
-  - url: http://api.simba.com/v1
-    description: Optional server description, e.g. Main (production) server
   - url: http://localhost:3000
-    description: Optional server description, e.g. Internal staging server for testing
+    description: Local development server
+  - url: http://api.simba.com/v1
+    description: Production server
 
+tags:
+  - name: Health
+    description: Server health and status
+  - name: Auth
+    description: Authentication — login, logout, token refresh, password reset
+  - name: Users
+    description: User management (Super Admin only)
+  - name: Items
+    description: Inventory item management
+  - name: Stocks
+    description: Stock transaction tracking (IN/OUT) — sub-resource of items
+  - name: Invoices
+    description: PDF invoice generation and history
+  - name: Finances
+    description: Finance record management with proof image upload
+  - name: Dashboard
+    description: Aggregate analytics and statistics
+  - name: Settings
+    description: Company profile and document sequence configuration
+
+# ─────────────────────────────────────────────
+# SECURITY SCHEMES
+# ─────────────────────────────────────────────
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+      description: |
+        HttpOnly JWT cookie set automatically by `POST /api/auth/login`.
+        Include credentials (`withCredentials: true`) in all API requests.
+
+  # ─────────────────────────────────────────────
+  # REUSABLE SCHEMAS
+  # ─────────────────────────────────────────────
+  schemas:
+
+    # ── Generic Response Wrappers ──────────────
+
+    SuccessResponse:
+      type: object
+      description: Generic success response wrapper
+      properties:
+        status:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: "success"
+        data:
+          description: Response payload (type varies per endpoint)
+        paging:
+          $ref: "#/components/schemas/PageMetadata"
+        error:
+          nullable: true
+          example: null
+
+    ErrorResponse:
+      type: object
+      description: Generic error response wrapper
+      properties:
+        status:
+          type: integer
+          example: 400
+        message:
+          type: string
+          example: "bad request"
+        data:
+          nullable: true
+          example: null
+        error:
+          description: Error detail (string or validation error map)
+
+    PageMetadata:
+      type: object
+      description: Pagination metadata included on list responses
+      properties:
+        page:
+          type: integer
+          description: Current page number (1-indexed)
+          example: 1
+        size:
+          type: integer
+          description: Items per page
+          example: 10
+        total_item:
+          type: integer
+          format: int64
+          description: Total number of matching records
+          example: 42
+        total_page:
+          type: integer
+          format: int64
+          description: Total number of pages
+          example: 5
+
+    # ── Auth ──────────────────────────────────
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 5
+          maxLength: 30
+          pattern: "^[a-zA-Z0-9]+$"
+          description: Alphanumeric username only
+          example: "adminuser"
+        password:
+          type: string
+          minLength: 4
+          maxLength: 30
+          description: Printable ASCII characters
+          example: "secret123"
+        remember_me:
+          type: boolean
+          description: Extend session duration
+          default: false
+          example: false
+
+    AuthUser:
+      type: object
+      description: Authenticated user identity returned after login
+      properties:
+        id:
+          type: integer
+          example: 1
+        fullname:
+          type: string
+          example: "Ahmad Ridwan"
+        role:
+          type: string
+          enum: [Admin, "Super Admin"]
+          example: "Admin"
+
+    RefreshSessionRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+          maxLength: 255
+          description: Optional — send via cookie or body
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+    ResetPasswordRequest:
+      type: object
+      required: [username, new_password]
+      properties:
+        username:
+          type: string
+          example: "adminuser"
+        new_password:
+          type: string
+          minLength: 4
+          example: "newSecret123"
+
+    RegisterUserRequest:
+      type: object
+      required: [username, fullname, role, password]
+      description: Register new user — requires `X-Reset-Secret` header
+      properties:
+        username:
+          type: string
+          minLength: 5
+          maxLength: 30
+          pattern: "^[a-zA-Z0-9]+$"
+          example: "newadmin"
+        fullname:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "New Admin User"
+        role:
+          type: string
+          enum: [Admin, "Super Admin"]
+          example: "Admin"
+        password:
+          type: string
+          minLength: 4
+          maxLength: 30
+          example: "pass1234"
+
+    # ── Users ─────────────────────────────────
+
+    CreateUserRequest:
+      type: object
+      required: [username, fullname, role, password]
+      properties:
+        username:
+          type: string
+          minLength: 5
+          maxLength: 30
+          pattern: "^[a-zA-Z0-9]+$"
+          example: "johndoe"
+        fullname:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "John Doe"
+        role:
+          type: string
+          enum: [Admin, "Super Admin"]
+          example: "Admin"
+        password:
+          type: string
+          minLength: 4
+          maxLength: 30
+          example: "pass1234"
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        fullname:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "John Doe Updated"
+        role:
+          type: string
+          enum: [Admin, "Super Admin"]
+          example: "Admin"
+        password:
+          type: string
+          minLength: 4
+          maxLength: 30
+          example: "newPass123"
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        username:
+          type: string
+          example: "johndoe"
+        fullname:
+          type: string
+          example: "John Doe"
+        role:
+          type: string
+          enum: [Admin, "Super Admin"]
+          example: "Admin"
+        is_active:
+          type: boolean
+          description: True if user is currently logged in
+          example: false
+        last_active:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-04-20T10:30:00Z"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-01-15T08:00:00Z"
+
+    UserStatsResponse:
+      type: object
+      properties:
+        users_total:
+          type: integer
+          format: int64
+          example: 10
+        users_super_admin_total:
+          type: integer
+          format: int64
+          example: 2
+        users_admin_total:
+          type: integer
+          format: int64
+          example: 8
+        users_active_total:
+          type: integer
+          format: int64
+          description: Users currently logged in
+          example: 3
+
+    # ── Items ─────────────────────────────────
+
+    AddItemRequest:
+      type: object
+      required: [name, category, stock, measure_unit, unit_price]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 90
+          example: "Beras Medium"
+        category:
+          type: string
+          minLength: 1
+          maxLength: 50
+          example: "Karbohidrat"
+        stock:
+          type: number
+          format: float
+          minimum: 0.01
+          description: Initial stock quantity (must be > 0)
+          example: 100.5
+        measure_unit:
+          type: string
+          minLength: 1
+          maxLength: 30
+          description: Unit of measurement (e.g., kg, liter, pcs)
+          example: "kg"
+        unit_price:
+          type: number
+          format: float
+          minimum: 0.01
+          description: Price per unit in IDR (must be > 0)
+          example: 12500
+        date_added:
+          type: string
+          format: date-time
+          nullable: true
+          description: Override creation timestamp (optional)
+          example: "2026-04-01T00:00:00Z"
+
+    UpdateItemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 90
+          example: "Beras Premium"
+        category:
+          type: string
+          minLength: 1
+          maxLength: 50
+          example: "Karbohidrat"
+        measure_unit:
+          type: string
+          minLength: 1
+          maxLength: 30
+          example: "kg"
+        unit_price:
+          type: number
+          format: float
+          minimum: 0.01
+          example: 14000
+
+    ItemResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: UUID-based item identifier
+          example: "ITM-20260401-001"
+        name:
+          type: string
+          example: "Beras Medium"
+        category:
+          type: string
+          example: "Karbohidrat"
+        stock:
+          type: number
+          format: float
+          description: Current stock quantity
+          example: 85.5
+        initial_stock:
+          type: number
+          format: float
+          description: Stock quantity when item was created
+          example: 100.5
+        measure_unit:
+          type: string
+          example: "kg"
+        unit_price:
+          type: number
+          format: float
+          description: Price per unit in IDR
+          example: 12500
+        total_price:
+          type: number
+          format: float
+          description: Current stock × unit price
+          example: 1068750
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-04-01T08:00:00Z"
+
+    # ── Stocks ────────────────────────────────
+
+    CreateStockRequest:
+      type: object
+      required: [type, amount, unit_price]
+      properties:
+        type:
+          type: string
+          enum: [IN, OUT]
+          description: "`IN` = stock received, `OUT` = stock consumed/sold"
+          example: "IN"
+        amount:
+          type: number
+          format: float
+          minimum: 0.01
+          description: Quantity of stock moved (must be > 0)
+          example: 50
+        unit_price:
+          type: number
+          format: float
+          minimum: 1
+          description: Price per unit for this transaction in IDR
+          example: 13000
+        supplier:
+          type: string
+          maxLength: 100
+          description: Supplier or recipient name (optional)
+          example: "UD Sejahtera"
+
+    EditStockRequest:
+      type: object
+      required: [amount, unit_price]
+      properties:
+        amount:
+          type: number
+          format: float
+          minimum: 0.01
+          example: 55
+        unit_price:
+          type: number
+          format: float
+          minimum: 0.01
+          example: 13500
+        supplier:
+          type: string
+          maxLength: 100
+          nullable: true
+          example: "UD Makmur"
+
+    StockResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 42
+        type:
+          type: string
+          enum: [IN, OUT]
+          example: "IN"
+        amount:
+          type: number
+          format: float
+          example: 50
+        previous_stock:
+          type: number
+          format: float
+          description: Stock quantity before this transaction
+          example: 35.5
+        new_stock:
+          type: number
+          format: float
+          description: Stock quantity after this transaction
+          example: 85.5
+        unit_price:
+          type: number
+          format: float
+          example: 13000
+        total_price:
+          type: number
+          format: float
+          description: amount × unit_price
+          example: 650000
+        supplier:
+          type: string
+          example: "UD Sejahtera"
+        modified_by:
+          type: string
+          description: Fullname of user who created this transaction
+          example: "Ahmad Ridwan"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-04-10T09:15:00Z"
+        item:
+          $ref: "#/components/schemas/ItemResponse"
+
+    StocksFinanceSummaryResponse:
+      type: object
+      description: Financial summary calculated from all stock transactions
+      properties:
+        master_items_total_budget:
+          type: number
+          format: float
+          description: Total value of all items at current stock × unit price
+          example: 5250000
+        budget_in:
+          type: number
+          format: float
+          description: Total money spent on IN transactions
+          example: 8000000
+        budget_out:
+          type: number
+          format: float
+          description: Total value of OUT transactions
+          example: 3200000
+        profit:
+          type: number
+          format: float
+          description: budget_in − budget_out
+          example: 4800000
+        current_budget:
+          type: number
+          format: float
+          description: Remaining budget value
+          example: 5250000
+
+    ItemStockSummaryResponse:
+      type: object
+      description: Per-item stock opname summary
+      properties:
+        item_id:
+          type: string
+          example: "ITM-20260401-001"
+        name:
+          type: string
+          example: "Beras Medium"
+        category:
+          type: string
+          example: "Karbohidrat"
+        initial_stock:
+          type: number
+          format: float
+          example: 100.5
+        measure_unit:
+          type: string
+          example: "kg"
+        total_in:
+          type: number
+          format: float
+          description: Sum of all IN transaction amounts
+          example: 200
+        total_out:
+          type: number
+          format: float
+          description: Sum of all OUT transaction amounts
+          example: 215
+        current_stock:
+          type: number
+          format: float
+          example: 85.5
+        buy_price:
+          type: number
+          format: float
+          description: Average or latest purchase price per unit
+          example: 13000
+        sell_price:
+          type: number
+          format: float
+          example: 13000
+        stock_value:
+          type: number
+          format: float
+          description: current_stock × buy_price
+          example: 1111500
+
+    # ── Invoices ──────────────────────────────
+
+    GenerateInvoiceRequest:
+      type: object
+      required: [company_name, company_address, company_contact, invoice_no, receiver_name, receiver_address, penanggungjawab, jabatan]
+      properties:
+        company_name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "SPPG Sejahtera"
+        company_address:
+          type: string
+          minLength: 2
+          maxLength: 200
+          example: "Jl. Pangan No. 12, Jakarta"
+        company_contact:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "+62 812-3456-7890"
+        invoice_no:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: Unique invoice number
+          example: "INV/2026/04/001"
+        date:
+          type: string
+          description: Invoice date string (display only)
+          example: "21 April 2026"
+        po_no:
+          type: string
+          maxLength: 50
+          nullable: true
+          description: Purchase Order number (optional)
+          example: "PO/2026/04/001"
+        quo_no:
+          type: string
+          maxLength: 50
+          nullable: true
+          description: Quotation number (optional)
+          example: "QUO/2026/04/001"
+        receiver_name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "Dinas Sosial Kota Jakarta"
+        receiver_address:
+          type: string
+          minLength: 2
+          maxLength: 200
+          example: "Jl. Kebon Sirih No. 35, Jakarta Pusat"
+        date_from:
+          type: string
+          format: date
+          nullable: true
+          description: Start date filter for stock transactions to include
+          example: "2026-04-01"
+        date_to:
+          type: string
+          format: date
+          nullable: true
+          description: End date filter for stock transactions to include
+          example: "2026-04-21"
+        stock_ids:
+          type: array
+          items:
+            type: integer
+          nullable: true
+          description: Specific stock transaction IDs to include (optional — if omitted all transactions in date range are used)
+          example: [1, 2, 5, 8]
+        stock_type:
+          type: string
+          enum: [IN, OUT]
+          default: "OUT"
+          description: Which type of stock transactions to include
+          example: "OUT"
+        keterangan:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Additional notes printed on invoice
+          example: "Pembayaran sesuai dengan kontrak No. 001/2026"
+        penanggungjawab:
+          type: string
+          minLength: 2
+          maxLength: 100
+          description: Responsible person name (signatory)
+          example: "Ahmad Ridwan"
+        jabatan:
+          type: string
+          minLength: 2
+          maxLength: 100
+          description: Responsible person's job title
+          example: "Kepala SPPG"
+        bank_account:
+          type: string
+          maxLength: 100
+          nullable: true
+          description: Bank account information for payment
+          example: "BRI 1234-5678-9012 a.n. SPPG Sejahtera"
+
+    InvoiceResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 7
+        stock_type:
+          type: string
+          enum: [IN, OUT]
+          example: "OUT"
+        company_name:
+          type: string
+          example: "SPPG Sejahtera"
+        company_contact:
+          type: string
+          example: "+62 812-3456-7890"
+        company_address:
+          type: string
+          example: "Jl. Pangan No. 12, Jakarta"
+        invoice_number:
+          type: string
+          example: "INV/2026/04/001"
+        po_number:
+          type: string
+          nullable: true
+          example: "PO/2026/04/001"
+        quo_number:
+          type: string
+          nullable: true
+          example: "QUO/2026/04/001"
+        has_items:
+          type: boolean
+          description: Whether the invoice contains line items
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-04-21T10:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-04-21T10:00:00Z"
+
+    # ── Finances ──────────────────────────────
+
+    FinanceResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 15
+        type:
+          type: string
+          description: Finance transaction type (e.g., "income", "expense")
+          example: "expense"
+        category:
+          type: string
+          example: "Transportasi"
+        description:
+          type: string
+          example: "Biaya antar bahan ke gudang utama"
+        amount:
+          type: integer
+          description: Transaction amount in IDR
+          example: 150000
+        extra_note:
+          type: string
+          nullable: true
+          example: "Sudah termasuk BBM"
+        proof_image:
+          type: string
+          description: URL path to uploaded proof image
+          example: "/uploads/finances/proof-20260421-001.jpg"
+        modified_by:
+          type: string
+          description: Fullname of user who created/last modified this record
+          example: "Ahmad Ridwan"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-04-21T11:30:00Z"
+
+    # ── Dashboard ─────────────────────────────
+
+    DashboardResponse:
+      type: object
+      properties:
+        total_items:
+          type: integer
+          format: int64
+          description: Total number of items in inventory
+          example: 35
+        stock_in:
+          type: number
+          format: float
+          description: Total accumulated stock IN value
+          example: 8000000
+        stock_out:
+          type: number
+          format: float
+          description: Total accumulated stock OUT value
+          example: 3200000
+        total_budget:
+          type: integer
+          format: int64
+          description: Total finance records budget (IDR)
+          example: 12000000
+        budget_in:
+          type: integer
+          format: int64
+          description: Total incoming budget from finance records (IDR)
+          example: 15000000
+        budget_out:
+          type: integer
+          format: int64
+          description: Total outgoing budget from finance records (IDR)
+          example: 3000000
+        monthly_budget:
+          type: array
+          description: Monthly income/expense breakdown for chart
+          items:
+            $ref: "#/components/schemas/MonthlyBudgetStat"
+        expense_composition:
+          type: array
+          description: Expense breakdown by category for pie chart
+          items:
+            $ref: "#/components/schemas/ExpenseComposition"
+        system_activities:
+          type: array
+          description: Recent system activity log
+          items:
+            $ref: "#/components/schemas/SystemActivity"
+
+    MonthlyBudgetStat:
+      type: object
+      properties:
+        month:
+          type: string
+          description: Month label (e.g., "Jan", "Feb")
+          example: "Apr"
+        in:
+          type: integer
+          format: int64
+          description: Total income for this month (IDR)
+          example: 5000000
+        out:
+          type: integer
+          format: int64
+          description: Total expense for this month (IDR)
+          example: 1200000
+
+    ExpenseComposition:
+      type: object
+      properties:
+        category:
+          type: string
+          example: "Transportasi"
+        amount:
+          type: integer
+          format: int64
+          description: Total amount for this category (IDR)
+          example: 850000
+
+    SystemActivity:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 101
+        type:
+          type: string
+          description: Activity type identifier
+          example: "stock_in"
+        title:
+          type: string
+          example: "Stock IN — Beras Medium"
+        description:
+          type: string
+          example: "50 kg ditambahkan oleh Ahmad Ridwan"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-04-21T09:45:00Z"
+
+    # ── Settings ──────────────────────────────
+
+    CompanyProfileRequest:
+      type: object
+      required: [company_name, company_address, company_contact]
+      properties:
+        company_name:
+          type: string
+          example: "SPPG Sejahtera"
+        company_address:
+          type: string
+          example: "Jl. Pangan No. 12, Jakarta"
+        company_contact:
+          type: string
+          example: "+62 812-3456-7890"
+        bank_account:
+          type: string
+          maxLength: 200
+          nullable: true
+          example: "BRI 1234-5678-9012 a.n. SPPG Sejahtera"
+
+    CompanyProfileResponse:
+      type: object
+      properties:
+        company_name:
+          type: string
+          example: "SPPG Sejahtera"
+        company_address:
+          type: string
+          example: "Jl. Pangan No. 12, Jakarta"
+        company_contact:
+          type: string
+          example: "+62 812-3456-7890"
+        bank_account:
+          type: string
+          nullable: true
+          example: "BRI 1234-5678-9012 a.n. SPPG Sejahtera"
+
+    DocumentSequenceResponse:
+      type: object
+      description: Auto-generated next document numbers for invoices and quotations
+      properties:
+        next_invoice_no:
+          type: string
+          example: "INV/2026/04/002"
+        next_quotation_no:
+          type: string
+          example: "QUO/2026/04/002"
+
+  # ─────────────────────────────────────────────
+  # REUSABLE PARAMETERS
+  # ─────────────────────────────────────────────
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: Page number (1-indexed)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    SizeParam:
+      name: size
+      in: query
+      description: Number of items per page (max 100)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+    SearchQueryParam:
+      name: search_query
+      in: query
+      description: Full-text search keyword
+      schema:
+        type: string
+    StartDateParam:
+      name: start_date
+      in: query
+      description: Filter records from this date (inclusive). Format `YYYY-MM-DD`
+      schema:
+        type: string
+        format: date
+    EndDateParam:
+      name: end_date
+      in: query
+      description: Filter records up to this date (inclusive). Format `YYYY-MM-DD`
+      schema:
+        type: string
+        format: date
+
+  # ─────────────────────────────────────────────
+  # REUSABLE RESPONSES
+  # ─────────────────────────────────────────────
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 401
+            message: "user unauthorized"
+            data: null
+            error: "user unauthorized"
+
+    Forbidden:
+      description: Authenticated but role lacks permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 403
+            message: "user forbidden"
+            data: null
+            error: "user forbidden"
+
+    NotFound:
+      description: Requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 404
+            message: "not found"
+            data: null
+            error: "not found"
+
+    ValidationError:
+      description: Request body failed validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 400
+            message: "validation error"
+            data: null
+            error:
+              username: "required"
+              password: "min=4"
+
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 500
+            message: "internal server error"
+            data: null
+            error: "internal server error"
+
+# ─────────────────────────────────────────────
+# PATHS
+# ─────────────────────────────────────────────
 paths:
-  /users:
+
+  # ── Health ────────────────────────────────────────────────────────────────
+
+  /:
     get:
-      summary: Returns a list of users.
-      description: Optional extended description in CommonMark or HTML.
+      tags: [Health]
+      summary: Welcome message
+      description: Returns a simple welcome message. No authentication required.
       responses:
-        "200": # status code
-          description: A JSON array of user names
+        "200":
+          description: Server is running
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "Welcome to SIMBA API"
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns server health status. Use this for uptime monitoring.
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "ok"
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: |
+        Authenticate with username and password.
+
+        On success, sets two HttpOnly cookies:
+        - `token` — access token (30 min TTL)
+        - `refresh_token` — refresh token (7 days TTL, scoped to `/api/auth` path)
+
+        Include `withCredentials: true` in all subsequent requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful — cookies set
+          headers:
+            Set-Cookie:
+              description: HttpOnly `token` and `refresh_token` cookies
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                type: array
-                items:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AuthUser"
+              example:
+                status: 200
+                message: "login success"
+                data:
+                  id: 1
+                  fullname: "Ahmad Ridwan"
+                  role: "Admin"
+                paging: null
+                error: null
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              example:
+                status: 401
+                message: "invalid username or password"
+                data: null
+                error: "invalid username or password"
+        "429":
+          description: Too many login attempts (rate limited — 10 req/min)
+
+  /api/auth/logout:
+    delete:
+      tags: [Auth]
+      summary: Logout
+      description: |
+        Invalidate the current session.
+
+        Clears both `token` and `refresh_token` cookies and revokes the refresh
+        token stored in the database.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Logout successful — cookies cleared
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "logout success"
+                data: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/_current:
+    get:
+      tags: [Auth]
+      summary: Get current user
+      description: Returns the identity of the currently authenticated user decoded from the JWT token.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AuthUser"
+              example:
+                status: 200
+                message: "success"
+                data:
+                  id: 1
+                  fullname: "Ahmad Ridwan"
+                  role: "Admin"
+                paging: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      description: |
+        Rotate both `token` and `refresh_token` cookies using the current refresh token.
+
+        The refresh token can be sent via cookie (automatically) or as a JSON body field.
+        Old refresh token is immediately revoked.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshSessionRequest"
+      responses:
+        "200":
+          description: Tokens rotated — new cookies set
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "refresh success"
+                data: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset user password
+      description: |
+        Reset a user's password.
+
+        **Requires `X-Reset-Secret` header** with the server-configured reset secret.
+        This endpoint is intended for administrative password recovery, not end-user self-service.
+      parameters:
+        - name: X-Reset-Secret
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Server-configured secret for password reset authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset successful
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "password reset success"
+                data: null
+                error: null
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Invalid or missing X-Reset-Secret header
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register new user
+      description: |
+        Create a new user account.
+
+        **Requires `X-Reset-Secret` header** with the server-configured reset secret.
+        This endpoint bypasses the normal Super Admin requirement for user creation.
+      parameters:
+        - name: X-Reset-Secret
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Server-configured secret for privileged registration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterUserRequest"
+      responses:
+        "201":
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/UserResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Invalid or missing X-Reset-Secret header
+        "409":
+          description: Username already taken
+          content:
+            application/json:
+              example:
+                status: 409
+                message: "user already exists"
+                data: null
+                error: "user already exists"
+
+  # ── Users ─────────────────────────────────────────────────────────────────
+
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List all users
+      description: Returns a paginated list of users. **Super Admin only.**
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: fullname
+          in: query
+          description: Filter by fullname (partial match)
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/UserResponse"
+              example:
+                status: 200
+                message: "success"
+                data:
+                  - id: 1
+                    username: "superadmin"
+                    fullname: "Super Administrator"
+                    role: "Super Admin"
+                    is_active: true
+                    last_active: "2026-04-21T10:00:00Z"
+                    created_at: "2026-01-01T00:00:00Z"
+                paging:
+                  page: 1
+                  size: 10
+                  total_item: 1
+                  total_page: 1
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      tags: [Users]
+      summary: Create user
+      description: Create a new user account. **Super Admin only.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/UserResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Username already exists
+          content:
+            application/json:
+              example:
+                status: 409
+                message: "user already exists"
+                data: null
+                error: "user already exists"
+
+  /api/users/stats:
+    get:
+      tags: [Users]
+      summary: Get user statistics
+      description: Returns aggregate user counts by role and active status. **Super Admin only.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: User statistics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/UserStatsResponse"
+              example:
+                status: 200
+                message: "success"
+                data:
+                  users_total: 10
+                  users_super_admin_total: 2
+                  users_admin_total: 8
+                  users_active_total: 3
+                paging: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: User ID (integer)
+        schema:
+          type: integer
+          example: 1
+
+    get:
+      tags: [Users]
+      summary: Get user by ID
+      description: Returns a single user's details. **Super Admin only.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: User found
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/UserResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      tags: [Users]
+      summary: Update user
+      description: Update user details. **Super Admin only.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/UserResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [Users]
+      summary: Delete user
+      description: |
+        Soft-delete a user. **Super Admin only.**
+
+        Restrictions:
+        - Cannot delete yourself
+        - Cannot delete the last Super Admin
+        - Cannot delete a currently active (logged-in) user
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: User deleted
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "user deleted"
+                data: null
+                error: null
+        "400":
+          description: Self-delete or business rule violation
+          content:
+            application/json:
+              example:
+                status: 400
+                message: "cannot self delete user"
+                data: null
+                error: "cannot self delete user"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Items ─────────────────────────────────────────────────────────────────
+
+  /api/items:
+    get:
+      tags: [Items]
+      summary: List all items
+      description: Returns a paginated, searchable list of inventory items. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SearchQueryParam"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Paginated item list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ItemResponse"
+              example:
+                status: 200
+                message: "success"
+                data:
+                  - id: "ITM-20260401-001"
+                    name: "Beras Medium"
+                    category: "Karbohidrat"
+                    stock: 85.5
+                    initial_stock: 100.5
+                    measure_unit: "kg"
+                    unit_price: 12500
+                    total_price: 1068750
+                    created_at: "2026-04-01T08:00:00Z"
+                paging:
+                  page: 1
+                  size: 10
+                  total_item: 1
+                  total_page: 1
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      tags: [Items]
+      summary: Create item
+      description: Add a new inventory item with initial stock. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddItemRequest"
+      responses:
+        "201":
+          description: Item created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ItemResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Item with same name already exists
+          content:
+            application/json:
+              example:
+                status: 409
+                message: "item already exists"
+                data: null
+                error: "item already exists"
+
+  /api/items/export:
+    get:
+      tags: [Items]
+      summary: Export items
+      description: Download all items as a file (CSV/Excel). **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: File download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/items/import:
+    post:
+      tags: [Items]
+      summary: Bulk import items from CSV
+      description: |
+        Import multiple items from a CSV file.
+
+        **CSV Format** (5 columns, header row required):
+        | Column | Description | Rules |
+        |--------|-------------|-------|
+        | Nama | Item name | string |
+        | Kategori | Category | string |
+        | Jumlah | Initial stock quantity | numeric > 0 |
+        | Satuan | Measure unit | string |
+        | Harga Satuan | Unit price (IDR) | numeric > 0 |
+
+        Max file size: **10MB**. Max rows: **500** per import.
+
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
                   type: string
+                  format: binary
+                  description: CSV file (max 10MB, max 500 rows)
+      responses:
+        "201":
+          description: Items imported successfully
+          content:
+            application/json:
+              example:
+                status: 201
+                message: "items imported"
+                data: null
+                error: null
+        "400":
+          description: Invalid CSV format or validation error
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: File exceeds size limit or wrong format
+          content:
+            application/json:
+              example:
+                status: 422
+                message: "only accept csv format"
+                data: null
+                error: "only accept csv format"
+
+  /api/items/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Item ID (string/UUID)
+        schema:
+          type: string
+          example: "ITM-20260401-001"
+
+    get:
+      tags: [Items]
+      summary: Get item by ID
+      description: Returns a single inventory item. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Item found
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ItemResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      tags: [Items]
+      summary: Update item
+      description: |
+        Update item metadata (name, category, unit, price).
+
+        **Note:** Stock quantity is managed via stock transactions, not this endpoint.
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateItemRequest"
+      responses:
+        "200":
+          description: Item updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ItemResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [Items]
+      summary: Delete item
+      description: Soft-delete an item and its stock transactions. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Item deleted
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "item deleted"
+                data: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Stocks ────────────────────────────────────────────────────────────────
+
+  /api/items/{id}/stocks:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Item ID (string/UUID)
+        schema:
+          type: string
+          example: "ITM-20260401-001"
+
+    post:
+      tags: [Stocks]
+      summary: Create stock transaction
+      description: |
+        Record a stock IN or OUT transaction for an item.
+
+        - `IN` — increases item stock, records supplier
+        - `OUT` — decreases item stock
+
+        Stock quantity on the parent item is updated atomically inside a DB transaction.
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStockRequest"
+      responses:
+        "201":
+          description: Stock transaction created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StockResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Item not found
+
+  /api/items/{id}/stocks/{stock_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Item ID (string/UUID)
+        schema:
+          type: string
+          example: "ITM-20260401-001"
+      - name: stock_id
+        in: path
+        required: true
+        description: Stock transaction ID (integer)
+        schema:
+          type: integer
+          example: 42
+
+    patch:
+      tags: [Stocks]
+      summary: Edit stock transaction
+      description: |
+        Correct a stock transaction's amount, unit price, or supplier.
+
+        The parent item's `stock` and `total_price` are recalculated automatically.
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditStockRequest"
+      responses:
+        "200":
+          description: Stock transaction updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StockResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [Stocks]
+      summary: Delete stock transaction
+      description: |
+        Remove a stock transaction. Parent item stock is recalculated.
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Stock transaction deleted
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "stock deleted"
+                data: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/items/stocks:
+    get:
+      tags: [Stocks]
+      summary: List all stock transactions
+      description: |
+        Returns a paginated list of all stock transactions across all items.
+        Filterable by type, date range, and keyword. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: type
+          in: query
+          description: Filter by transaction type
+          schema:
+            type: string
+            enum: [ALL, IN, OUT]
+            default: "ALL"
+        - $ref: "#/components/parameters/SearchQueryParam"
+        - $ref: "#/components/parameters/StartDateParam"
+        - $ref: "#/components/parameters/EndDateParam"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Paginated stock transaction list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/StockResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/items/stocks/summary:
+    get:
+      tags: [Stocks]
+      summary: Get stock finance summary
+      description: |
+        Returns an aggregate financial summary of all stock transactions:
+        total budget, IN/OUT totals, profit, and current budget value.
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Stock financial summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/StocksFinanceSummaryResponse"
+              example:
+                status: 200
+                message: "success"
+                data:
+                  master_items_total_budget: 5250000
+                  budget_in: 8000000
+                  budget_out: 3200000
+                  profit: 4800000
+                  current_budget: 5250000
+                paging: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/items/stocks/opname:
+    get:
+      tags: [Stocks]
+      summary: Get stock opname summary
+      description: |
+        Returns a per-item stock summary including initial stock, total IN/OUT,
+        current stock, and stock value. Used for physical stock count (opname) verification.
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Per-item stock opname summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ItemStockSummaryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Invoices ──────────────────────────────────────────────────────────────
+
+  /api/items/invoice:
+    post:
+      tags: [Invoices]
+      summary: Generate invoice PDF
+      description: |
+        Generate a PDF invoice from stock transaction data and save the record to the database.
+
+        The response body is a **PDF binary** (not JSON). The invoice record metadata is
+        also persisted and retrievable via `GET /api/items/invoices`.
+
+        You can filter transactions by:
+        - `stock_ids` — specific transaction IDs
+        - `date_from` / `date_to` — date range
+        - `stock_type` — IN or OUT transactions
+
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateInvoiceRequest"
+      responses:
+        "200":
+          description: PDF invoice generated and returned as binary stream
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              description: Attachment filename for the PDF
+              schema:
+                type: string
+                example: 'attachment; filename="INV-2026-04-001.pdf"'
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/items/invoices:
+    get:
+      tags: [Invoices]
+      summary: List invoice history
+      description: Returns a paginated list of previously generated invoices. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Paginated invoice list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/InvoiceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/items/invoices/{id}/pdf:
+    get:
+      tags: [Invoices]
+      summary: Download invoice PDF
+      description: Re-download the PDF for a previously generated invoice. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Invoice ID (integer)
+          schema:
+            type: integer
+            example: 7
+      responses:
+        "200":
+          description: PDF binary
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/items/invoices/{id}:
+    delete:
+      tags: [Invoices]
+      summary: Delete invoice record
+      description: Delete an invoice record from the database. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Invoice ID (integer)
+          schema:
+            type: integer
+            example: 7
+      responses:
+        "200":
+          description: Invoice deleted
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "invoice deleted"
+                data: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Finances ──────────────────────────────────────────────────────────────
+
+  /api/finances:
+    get:
+      tags: [Finances]
+      summary: List all finance records
+      description: |
+        Returns a paginated list of finance records.
+        Filterable by keyword and date range. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SearchQueryParam"
+        - $ref: "#/components/parameters/StartDateParam"
+        - $ref: "#/components/parameters/EndDateParam"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Paginated finance record list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/FinanceResponse"
+              example:
+                status: 200
+                message: "success"
+                data:
+                  - id: 15
+                    type: "expense"
+                    category: "Transportasi"
+                    description: "Biaya antar bahan ke gudang utama"
+                    amount: 150000
+                    extra_note: "Sudah termasuk BBM"
+                    proof_image: "/uploads/finances/proof-20260421-001.jpg"
+                    modified_by: "Ahmad Ridwan"
+                    created_at: "2026-04-21T11:30:00Z"
+                paging:
+                  page: 1
+                  size: 10
+                  total_item: 1
+                  total_page: 1
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      tags: [Finances]
+      summary: Create finance record
+      description: |
+        Record a new finance transaction with a mandatory proof image upload.
+
+        **Request format: `multipart/form-data`**
+
+        Proof image constraints:
+        - Accepted formats: PNG, JPG, JPEG
+        - Max file size: **15MB**
+
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [type, category, description, amount, proof_image]
+              properties:
+                type:
+                  type: string
+                  description: Finance type (e.g., `income`, `expense`)
+                  example: "expense"
+                category:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  example: "Transportasi"
+                description:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                  example: "Biaya antar bahan ke gudang"
+                amount:
+                  type: integer
+                  description: Transaction amount in IDR
+                  example: 150000
+                extra_note:
+                  type: string
+                  maxLength: 255
+                  nullable: true
+                  example: "Sudah termasuk BBM"
+                proof_image:
+                  type: string
+                  format: binary
+                  description: Proof image file (PNG/JPG/JPEG, max 15MB)
+      responses:
+        "201":
+          description: Finance record created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/FinanceResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: Invalid file format or file exceeds size limit
+          content:
+            application/json:
+              example:
+                status: 422
+                message: "invalid file format"
+                data: null
+                error: "only PNG, JPG, JPEG accepted"
+
+  /api/finances/export:
+    get:
+      tags: [Finances]
+      summary: Export finance records
+      description: Download all finance records as a file. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: File download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/finances/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Finance record ID (integer)
+        schema:
+          type: integer
+          example: 15
+
+    get:
+      tags: [Finances]
+      summary: Get finance record by ID
+      description: Returns a single finance record. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Finance record found
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/FinanceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      tags: [Finances]
+      summary: Update finance record
+      description: |
+        Update a finance record. Proof image can optionally be replaced.
+
+        **Request format: `multipart/form-data`** (same as create).
+        All fields are optional in update — only send the fields you want to change.
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  example: "expense"
+                category:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  example: "Logistik"
+                description:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                  example: "Updated description"
+                amount:
+                  type: integer
+                  example: 200000
+                extra_note:
+                  type: string
+                  maxLength: 255
+                  nullable: true
+                proof_image:
+                  type: string
+                  format: binary
+                  description: New proof image (PNG/JPG/JPEG, max 15MB) — optional
+      responses:
+        "200":
+          description: Finance record updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/FinanceResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [Finances]
+      summary: Delete finance record
+      description: Soft-delete a finance record. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Finance record deleted
+          content:
+            application/json:
+              example:
+                status: 200
+                message: "finance deleted"
+                data: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Dashboard ─────────────────────────────────────────────────────────────
+
+  /api/dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard statistics
+      description: |
+        Returns aggregate analytics for the dashboard including:
+        - Inventory totals (items count, stock IN/OUT values)
+        - Finance totals (total budget, income, expense)
+        - Monthly budget chart data (12-month breakdown)
+        - Expense composition by category (for pie chart)
+        - Recent system activity log
+
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DashboardResponse"
+              example:
+                status: 200
+                message: "success"
+                data:
+                  total_items: 35
+                  stock_in: 8000000
+                  stock_out: 3200000
+                  total_budget: 12000000
+                  budget_in: 15000000
+                  budget_out: 3000000
+                  monthly_budget:
+                    - month: "Jan"
+                      in: 5000000
+                      out: 1200000
+                    - month: "Feb"
+                      in: 4500000
+                      out: 900000
+                  expense_composition:
+                    - category: "Transportasi"
+                      amount: 850000
+                    - category: "Logistik"
+                      amount: 2150000
+                  system_activities:
+                    - id: 101
+                      type: "stock_in"
+                      title: "Stock IN — Beras Medium"
+                      description: "50 kg ditambahkan oleh Ahmad Ridwan"
+                      created_at: "2026-04-21T09:45:00Z"
+                paging: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Settings ──────────────────────────────────────────────────────────────
+
+  /api/settings/company:
+    get:
+      tags: [Settings]
+      summary: Get company profile
+      description: Returns the saved company profile used in invoice generation. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Company profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/CompanyProfileResponse"
+              example:
+                status: 200
+                message: "success"
+                data:
+                  company_name: "SPPG Sejahtera"
+                  company_address: "Jl. Pangan No. 12, Jakarta"
+                  company_contact: "+62 812-3456-7890"
+                  bank_account: "BRI 1234-5678-9012 a.n. SPPG Sejahtera"
+                paging: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    put:
+      tags: [Settings]
+      summary: Update company profile
+      description: Save or update the company profile. **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyProfileRequest"
+      responses:
+        "200":
+          description: Company profile updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/CompanyProfileResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/settings/next-document-number:
+    get:
+      tags: [Settings]
+      summary: Get next document numbers
+      description: |
+        Returns the next auto-incremented invoice number and quotation number
+        based on the current month and sequence.
+
+        Use these values to pre-fill the invoice generation form.
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Next document sequence numbers
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DocumentSequenceResponse"
+              example:
+                status: 200
+                message: "success"
+                data:
+                  next_invoice_no: "INV/2026/04/002"
+                  next_quotation_no: "QUO/2026/04/002"
+                paging: null
+                error: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Static Files ──────────────────────────────────────────────────────────
+
+  /uploads/{filepath}:
+    get:
+      tags: [Finances]
+      summary: Serve uploaded file
+      description: |
+        Serve a static uploaded file (proof images, etc.).
+
+        Typical usage: use the `proof_image` path from a `FinanceResponse` directly
+        as the URL to display the image.
+
+        **Admin / Super Admin.**
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: filepath
+          in: path
+          required: true
+          description: File path relative to uploads directory
+          schema:
+            type: string
+            example: "finances/proof-20260421-001.jpg"
+      responses:
+        "200":
+          description: File content
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: File not found
+          content:
+            application/json:
+              example:
+                status: 404
+                message: "file not found"
+                data: null
+                error: "file not found"

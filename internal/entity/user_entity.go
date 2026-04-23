@@ -12,8 +12,7 @@ type User struct {
 	Fullname         string `gorm:"size:50;not null"`
 	Role             string `gorm:"size:20;not null"`
 	Password         string `gorm:"size:255;not null"`
-	Token            string `gorm:"size:64;index"`
-	TokenExpiresAt   time.Time
+	Avatar           string `gorm:"size:255"`
 	RefreshToken     string `gorm:"size:64;index"`
 	RefreshExpiresAt time.Time
 	IsActive         bool `gorm:"type:boolean;default:false"`

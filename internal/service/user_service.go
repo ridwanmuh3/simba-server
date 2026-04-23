@@ -21,6 +21,7 @@ type UserService struct {
 	log            *zap.SugaredLogger
 	validate       *validator.Validate
 	userRepository UserRepository
+	jwtSecret      []byte
 }
 
 type UserRepository interface {
@@ -30,19 +31,19 @@ type UserRepository interface {
 	Delete(db *gorm.DB, entity *entity.User) error
 	FindByUsername(db *gorm.DB, user *entity.User, username string) error
 	FindByRefreshToken(db *gorm.DB, user *entity.User, token string) error
-	FindByToken(db *gorm.DB, user *entity.User, token string) error
 	FindAll(db *gorm.DB, query *model.FindAllUserRequest) ([]entity.User, int64, error)
 	GetUsersStats(db *gorm.DB) (*entity.UserStats, error)
 }
 
 var _ UserRepository = (*repository.UserRepository)(nil)
 
-func NewUserService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, userRepository UserRepository) *UserService {
+func NewUserService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, userRepository UserRepository, jwtSecret []byte) *UserService {
 	return &UserService{
 		db:             db,
 		log:            logger,
 		validate:       validate,
 		userRepository: userRepository,
+		jwtSecret:      jwtSecret,
 	}
 }
 
@@ -235,7 +236,6 @@ func (s *UserService) ResetPassword(ctx context.Context, request *model.ResetPas
 	}
 
 	user.Password = string(hash)
-	user.Token = ""
 	user.RefreshToken = ""
 	user.IsActive = false
 
@@ -251,6 +251,76 @@ func (s *UserService) ResetPassword(ctx context.Context, request *model.ResetPas
 
 	s.log.Infof("reset-password: password reset for user %s", request.Username)
 	return nil
+}
+
+func (s *UserService) UpdateProfile(ctx context.Context, request *model.UpdateProfileRequest) (*model.UserResponse, error) {
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+
+	if err := s.validate.Struct(request); err != nil {
+		s.log.Errorf("failed to validate profile update: %v", err)
+		return nil, err
+	}
+
+	user := new(entity.User)
+	if err := s.userRepository.FindById(tx, user, request.AuthID); err != nil {
+		s.log.Errorf("failed to find user for profile update: %v", err)
+		return nil, exception.UserNotFoundError
+	}
+
+	if request.NewPassword != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(request.OldPassword)); err != nil {
+			s.log.Errorf("old password mismatch for user %d", request.AuthID)
+			return nil, exception.UserPasswordNotMatch
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(request.NewPassword), bcrypt.DefaultCost)
+		if err != nil {
+			s.log.Errorf("failed to hash new password: %v", err)
+			return nil, exception.InternalServerError
+		}
+		user.Password = string(hash)
+	}
+
+	if request.Fullname != "" {
+		user.Fullname = request.Fullname
+	}
+
+	if err := s.userRepository.Save(tx, user); err != nil {
+		s.log.Errorf("failed to save updated profile: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		s.log.Errorf("failed to commit profile update: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	return converter.UserToResponse(user), nil
+}
+
+func (s *UserService) UpdateAvatar(ctx context.Context, id int, avatarPath string) (*model.UserResponse, error) {
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+
+	user := new(entity.User)
+	if err := s.userRepository.FindById(tx, user, id); err != nil {
+		s.log.Errorf("failed to find user for avatar update: %v", err)
+		return nil, exception.UserNotFoundError
+	}
+
+	user.Avatar = avatarPath
+
+	if err := s.userRepository.Save(tx, user); err != nil {
+		s.log.Errorf("failed to save avatar: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		s.log.Errorf("failed to commit avatar update: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	return converter.UserToResponse(user), nil
 }
 
 func (s *UserService) GetUsersStats(ctx context.Context) (*model.UsersStatsResponse, error) {
