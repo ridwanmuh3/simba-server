@@ -89,6 +89,10 @@ func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx 
 			tx = tx.Where("stock_tracks.type = ?", query.Type)
 		}
 
+		if query.Category != "" {
+			tx = tx.Where("item.category = ?", query.Category)
+		}
+
 		return tx
 	}
 }

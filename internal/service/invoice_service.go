@@ -42,17 +42,24 @@ type InvoiceService struct {
 }
 
 type invoiceHistoryRow struct {
-	ID             uint
-	StockType      string
-	CompanyName    string
-	CompanyContact string
-	CompanyAddress string
-	InvoiceNumber  string
-	PONumber       string
-	QuoNumber      string
-	HasItems       bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID              uint
+	StockType       string
+	CompanyName     string
+	CompanyContact  string
+	CompanyAddress  string
+	InvoiceNumber   string
+	PONumber        string
+	QuoNumber       string
+	ReceiverName    string
+	ReceiverAddress string
+	InvoiceDate     string
+	Keterangan      string
+	Penanggungjawab string
+	Jabatan         string
+	BankAccount     string
+	HasItems        bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func NewInvoiceService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate) *InvoiceService {
@@ -78,22 +85,26 @@ func (s *InvoiceService) GetInvoiceItems(ctx context.Context, request *model.Get
 	}
 	query := db.Model(new(entity.StockTracking)).Preload("Item").Where("type = ?", stockType)
 
-	if request.DateFrom != "" {
-		parsedFrom, err := time.Parse(time.RFC3339Nano, request.DateFrom)
-		if err != nil {
-			s.log.Errorf("failed to parse date from: %v", err)
-			return nil, exception.InternalServerError
+	if len(request.StockIDs) > 0 {
+		query = query.Where("id IN ?", request.StockIDs)
+	} else {
+		if request.DateFrom != "" {
+			parsedFrom, err := time.Parse(time.RFC3339Nano, request.DateFrom)
+			if err != nil {
+				s.log.Errorf("failed to parse date from: %v", err)
+				return nil, exception.InternalServerError
+			}
+			query = query.Where("created_at >= ?", parsedFrom.UTC())
 		}
-		query = query.Where("created_at >= ?", parsedFrom.UTC())
-	}
 
-	if request.DateTo != "" {
-		parsedTo, err := time.Parse(time.RFC3339Nano, request.DateTo)
-		if err != nil {
-			s.log.Errorf("failed to parse date to: %v", err)
-			return nil, exception.InternalServerError
+		if request.DateTo != "" {
+			parsedTo, err := time.Parse(time.RFC3339Nano, request.DateTo)
+			if err != nil {
+				s.log.Errorf("failed to parse date to: %v", err)
+				return nil, exception.InternalServerError
+			}
+			query = query.Where("created_at <= ?", parsedTo.UTC())
 		}
-		query = query.Where("created_at <= ?", parsedTo.UTC())
 	}
 
 	if err := query.Order("item_id ASC").Limit(500).Find(&stocks).Error; err != nil {
@@ -279,6 +290,13 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 		"invoices.invoice_number",
 		"invoices.po_number",
 		"invoices.quo_number",
+		"invoices.receiver_name",
+		"invoices.receiver_address",
+		"invoices.invoice_date",
+		"invoices.keterangan",
+		"invoices.penanggungjawab",
+		"invoices.jabatan",
+		"invoices.bank_account",
 		"invoices.created_at",
 		"invoices.updated_at",
 		"EXISTS (SELECT 1 FROM invoice_items WHERE invoice_items.invoice_id = invoices.id) AS has_items",
@@ -301,21 +319,59 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 	responses := make([]model.InvoiceResponse, len(invoices))
 	for i, invoice := range invoices {
 		responses[i] = model.InvoiceResponse{
-			ID:             invoice.ID,
-			StockType:      invoice.StockType,
-			CompanyName:    invoice.CompanyName,
-			CompanyContact: invoice.CompanyContact,
-			CompanyAddress: invoice.CompanyAddress,
-			InvoiceNumber:  invoice.InvoiceNumber,
-			PONumber:       invoice.PONumber,
-			QuoNumber:      invoice.QuoNumber,
-			HasItems:       invoice.HasItems,
-			CreatedAt:      invoice.CreatedAt,
-			UpdatedAt:      invoice.UpdatedAt,
+			ID:              invoice.ID,
+			StockType:       invoice.StockType,
+			CompanyName:     invoice.CompanyName,
+			CompanyContact:  invoice.CompanyContact,
+			CompanyAddress:  invoice.CompanyAddress,
+			InvoiceNumber:   invoice.InvoiceNumber,
+			PONumber:        invoice.PONumber,
+			QuoNumber:       invoice.QuoNumber,
+			ReceiverName:    invoice.ReceiverName,
+			ReceiverAddress: invoice.ReceiverAddress,
+			InvoiceDate:     invoice.InvoiceDate,
+			Keterangan:      invoice.Keterangan,
+			Penanggungjawab: invoice.Penanggungjawab,
+			Jabatan:         invoice.Jabatan,
+			BankAccount:     invoice.BankAccount,
+			HasItems:        invoice.HasItems,
+			CreatedAt:       invoice.CreatedAt,
+			UpdatedAt:       invoice.UpdatedAt,
 		}
 	}
 
 	return responses, total, nil
+}
+
+func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.UpdateInvoiceRequest) error {
+	db := s.db.WithContext(ctx)
+
+	var invoice entity.Invoice
+	if err := db.First(&invoice, request.ID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
+		}
+		s.log.Errorf("failed to find invoice %d: %v", request.ID, err)
+		return exception.InternalServerError
+	}
+
+	invoice.CompanyName = request.CompanyName
+	invoice.CompanyAddress = request.CompanyAddress
+	invoice.CompanyContact = request.CompanyContact
+	invoice.ReceiverName = request.ReceiverName
+	invoice.ReceiverAddress = request.ReceiverAddress
+	invoice.InvoiceDate = request.InvoiceDate
+	invoice.Keterangan = request.Keterangan
+	invoice.Penanggungjawab = request.Penanggungjawab
+	invoice.Jabatan = request.Jabatan
+	invoice.BankAccount = request.BankAccount
+
+	if err := db.Save(&invoice).Error; err != nil {
+		s.log.Errorf("failed to update invoice %d: %v", request.ID, err)
+		return exception.InternalServerError
+	}
+
+	return nil
 }
 
 func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint) error {

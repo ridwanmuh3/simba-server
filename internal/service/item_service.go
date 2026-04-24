@@ -354,6 +354,22 @@ func (s *ItemService) FindAll(ctx context.Context, request *model.FindAllItemsRe
 	return responses, total, nil
 }
 
+func (s *ItemService) GetItemCategories(ctx context.Context) ([]string, error) {
+	db := s.db.WithContext(ctx)
+
+	var categories []string
+	if err := db.Model(new(entity.Item)).
+		Where("category != ''").
+		Distinct("category").
+		Order("category ASC").
+		Pluck("category", &categories).Error; err != nil {
+		s.log.Errorf("failed to get item categories: %v", err)
+		return nil, exception.InternalServerError
+	}
+
+	return categories, nil
+}
+
 func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, int, error) {
 	db := s.db.WithContext(ctx)
 

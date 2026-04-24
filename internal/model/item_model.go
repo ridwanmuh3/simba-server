@@ -66,9 +66,30 @@ type InvoiceResponse struct {
 	InvoiceNumber  string    `json:"invoice_number"`
 	PONumber       string    `json:"po_number"`
 	QuoNumber      string    `json:"quo_number"`
+	ReceiverName    string    `json:"receiver_name"`
+	ReceiverAddress string    `json:"receiver_address"`
+	InvoiceDate     string    `json:"invoice_date"`
+	Keterangan      string    `json:"keterangan"`
+	Penanggungjawab string    `json:"penanggungjawab"`
+	Jabatan         string    `json:"jabatan"`
+	BankAccount     string    `json:"bank_account"`
 	HasItems       bool      `json:"has_items"`
 	CreatedAt      time.Time `json:"created_at,omitzero"`
 	UpdatedAt      time.Time `json:"updated_at,omitzero"`
+}
+
+type UpdateInvoiceRequest struct {
+	ID              uint   `param:"id"`
+	CompanyName     string `json:"company_name" validate:"required,min=2,max=100"`
+	CompanyAddress  string `json:"company_address" validate:"required,min=2,max=200"`
+	CompanyContact  string `json:"company_contact" validate:"required,min=2,max=100"`
+	ReceiverName    string `json:"receiver_name" validate:"omitempty,max=100"`
+	ReceiverAddress string `json:"receiver_address" validate:"omitempty,max=200"`
+	InvoiceDate     string `json:"invoice_date" validate:"omitempty,max=100"`
+	Keterangan      string `json:"keterangan" validate:"omitempty,max=500"`
+	Penanggungjawab string `json:"penanggungjawab" validate:"omitempty,max=100"`
+	Jabatan         string `json:"jabatan" validate:"omitempty,max=100"`
+	BankAccount     string `json:"bank_account" validate:"omitempty,max=100"`
 }
 
 type InvoiceData struct {
@@ -115,6 +136,7 @@ type GenerateInvoiceRequest struct {
 
 	DateFrom string `json:"date_from"`
 	DateTo   string `json:"date_to"`
+	StockIDs []uint `json:"stock_ids"`
 
 	// StockType: "OUT" (default) or "IN" — determines which stock tab context to pull.
 	StockType string `json:"stock_type" validate:"omitempty,oneof=IN OUT"`
@@ -192,6 +214,7 @@ type FindAllItemsRequest struct {
 
 type FindAllStocksRequest struct {
 	Type        string `query:"type,omitempty" validate:"omitempty,max=10"`
+	Category    string `query:"category,omitempty" validate:"omitempty,max=50"`
 	SearchQuery string `query:"search_query,omitempty" validate:"omitempty,max=30"`
 	StartDate   string `query:"start_date,omitempty" validate:"omitempty"`
 	EndDate     string `query:"end_date,omitempty" validate:"omitempty"`
@@ -203,6 +226,7 @@ type GetInvoiceItemsRequest struct {
 	DateFrom  string `query:"date_from,omitempty" validate:"omitempty,max=50"`
 	DateTo    string `query:"date_to,omitempty" validate:"omitempty,max=50"`
 	StockType string `query:"stock_type,omitempty" validate:"omitempty,oneof=IN OUT"`
+	StockIDs  []uint
 }
 
 type FindAllInvoicesRequest struct {

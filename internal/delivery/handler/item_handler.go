@@ -41,6 +41,7 @@ type ItemService interface {
 	Delete(ctx context.Context, request *model.DeleteItemRequest) (bool, error)
 	FindById(ctx context.Context, request *model.FindByIdItemRequest) (*model.ItemResponse, error)
 	FindAll(ctx context.Context, request *model.FindAllItemsRequest) ([]model.ItemResponse, int64, error)
+	GetItemCategories(ctx context.Context) ([]string, error)
 }
 
 type StockService interface {
@@ -57,6 +58,7 @@ type InvoiceService interface {
 	SaveInvoice(ctx context.Context, request *model.GenerateInvoiceRequest, summary *model.InvoiceSummary) error
 	FindAllInvoices(ctx context.Context, request *model.FindAllInvoicesRequest) ([]model.InvoiceResponse, int64, error)
 	FindInvoiceByID(ctx context.Context, id uint) (*model.InvoiceData, error)
+	UpdateInvoice(ctx context.Context, request *model.UpdateInvoiceRequest) error
 	DeleteInvoice(ctx context.Context, id uint) error
 }
 
@@ -401,6 +403,20 @@ func (h *ItemHandler) FindById(c *fiber.Ctx) error {
 	})
 }
 
+func (h *ItemHandler) GetItemCategories(c *fiber.Ctx) error {
+	categories, err := h.itemService.GetItemCategories(c.Context())
+	if err != nil {
+		h.log.Warnf("failed to get item categories: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[[]string]{
+		Status:  fiber.StatusOK,
+		Message: "get item categories success",
+		Data:    categories,
+	})
+}
+
 func (h *ItemHandler) FindAll(c *fiber.Ctx) error {
 	request := &model.FindAllItemsRequest{
 		SearchQuery: c.Query("search_query", ""),
@@ -439,6 +455,7 @@ func (h *ItemHandler) FindAllStocks(c *fiber.Ctx) error {
 		Page:        c.QueryInt("page", 1),
 		Size:        c.QueryInt("size", 10),
 		Type:        c.Query("type", "ALL"),
+		Category:    c.Query("category", ""),
 	}
 
 	response, total, err := h.stockService.FindAllStocks(c.Context(), request)
@@ -558,6 +575,7 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		DateFrom:  request.DateFrom,
 		DateTo:    request.DateTo,
 		StockType: stockType,
+		StockIDs:  request.StockIDs,
 	}
 
 	summary, err := h.invoiceService.GetInvoiceItems(c.Context(), invoiceItemsReq)
@@ -713,6 +731,37 @@ func (h *ItemHandler) DownloadInvoicePDF(c *fiber.Ctx) error {
 	c.Set("Content-Type", "application/pdf")
 	c.Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, filename))
 	return c.Send(pdfBuffer.Bytes())
+}
+
+func (h *ItemHandler) UpdateInvoice(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil || id == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid invoice id")
+	}
+
+	request := new(model.UpdateInvoiceRequest)
+	if err := c.BodyParser(request); err != nil {
+		h.log.Warnf("failed to parse update invoice request: %v", err)
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	request.ID = uint(id)
+
+	if err := h.validate.Struct(request); err != nil {
+		h.log.Warnf("failed to validate update invoice request: %v", err)
+		return fiber.NewError(fiber.StatusBadRequest, "validation failed")
+	}
+
+	if err := h.invoiceService.UpdateInvoice(c.Context(), request); err != nil {
+		h.log.Warnf("failed to update invoice %d: %v", id, err)
+		return err
+	}
+
+	return c.JSON(model.Response[bool]{
+		Status:  fiber.StatusOK,
+		Message: "update invoice success",
+		Data:    true,
+	})
 }
 
 func (h *ItemHandler) DeleteInvoice(c *fiber.Ctx) error {

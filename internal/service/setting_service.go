@@ -41,12 +41,14 @@ func NewSettingService(db *gorm.DB, settingRepo SettingRepository, log *zap.Suga
 }
 
 const (
-	KeyCompanyName    = "company_name"
-	KeyCompanyAddress = "company_address"
-	KeyCompanyContact = "company_contact"
-	KeyBankAccount    = "bank_account"
-	KeySeqInvoice     = "seq_invoice"
-	KeySeqQuotation   = "seq_quotation"
+	KeyCompanyName      = "company_name"
+	KeyCompanyAddress   = "company_address"
+	KeyCompanyContact   = "company_contact"
+	KeyBankAccount      = "bank_account"
+	KeyPenanggungjawab  = "penanggungjawab"
+	KeyJabatan          = "jabatan"
+	KeySeqInvoice       = "seq_invoice"
+	KeySeqQuotation     = "seq_quotation"
 )
 
 const DefaultBankAccount = "BNI 2048441550 A.N Koperasi Konsumen Dewa Makmur Multi Sejahtera"
@@ -104,6 +106,8 @@ func (s *SettingService) GetCompanyProfile(ctx context.Context) (*model.CompanyP
 	address, _ := s.settingRepo.GetByKey(db, KeyCompanyAddress)
 	contact, _ := s.settingRepo.GetByKey(db, KeyCompanyContact)
 	bank, _ := s.settingRepo.GetByKey(db, KeyBankAccount)
+	pj, _ := s.settingRepo.GetByKey(db, KeyPenanggungjawab)
+	jabatan, _ := s.settingRepo.GetByKey(db, KeyJabatan)
 
 	resp := &model.CompanyProfileResponse{
 		BankAccount: DefaultBankAccount,
@@ -119,6 +123,12 @@ func (s *SettingService) GetCompanyProfile(ctx context.Context) (*model.CompanyP
 	}
 	if bank != nil && strings.TrimSpace(bank.Value) != "" {
 		resp.BankAccount = bank.Value
+	}
+	if pj != nil {
+		resp.Penanggungjawab = pj.Value
+	}
+	if jabatan != nil {
+		resp.Jabatan = jabatan.Value
 	}
 
 	return resp, nil
@@ -142,6 +152,12 @@ func (s *SettingService) UpdateCompanyProfile(ctx context.Context, req *model.Co
 		return err
 	}
 	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyBankAccount, Value: req.BankAccount}); err != nil {
+		return err
+	}
+	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyPenanggungjawab, Value: req.Penanggungjawab}); err != nil {
+		return err
+	}
+	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyJabatan, Value: req.Jabatan}); err != nil {
 		return err
 	}
 
