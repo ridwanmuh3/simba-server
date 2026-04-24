@@ -566,11 +566,12 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		return err
 	}
 
+	label := "KELUAR"
+	if stockType == "IN" {
+		label = "MASUK"
+	}
 	if len(summary.Items) == 0 {
-		label := "keluar"
-		if stockType == "IN" {
-			label = "masuk"
-		}
+
 		return fiber.NewError(fiber.StatusNotFound, fmt.Sprintf("tidak ada data bahan %s pada rentang tanggal yang dipilih", label))
 	}
 
@@ -622,7 +623,8 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		}
 		return '_'
 	}, request.InvoiceNo)
-	filename := url.PathEscape(fmt.Sprintf("invoice-%s.pdf", safeInvoiceNo))
+
+	filename := url.PathEscape(fmt.Sprintf("INVOICE-BARANG %s-%s.pdf", label, safeInvoiceNo))
 
 	c.Set("Content-Type", "application/pdf")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))

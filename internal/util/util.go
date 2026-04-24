@@ -121,7 +121,7 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	pdf := fpdf.New("L", "mm", "A5", "")
 
 	// Reduced top margin from 10 to 5 to pull everything up
-	pdf.SetMargins(10, 5, 10)
+	pdf.SetMargins(12, 5, 12)
 	pdf.SetAutoPageBreak(true, 5)
 
 	// FIXED PAGINATION LOGIC
@@ -204,7 +204,6 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 
 	// Expanded Y-limit due to compacted header/rows
 	const itemsMaxY = 115.0
-	const lastPageItemsMaxY = 115.0
 
 	for i, item := range data.Items {
 		if pdf.GetY() > itemsMaxY {
@@ -219,11 +218,6 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 		pdf.CellFormat(30, 5, formatRupiah(item.UnitPrice), "1", 0, "R", false, 0, "")
 		pdf.CellFormat(15, 5, "0", "1", 0, "C", false, 0, "")
 		pdf.CellFormat(35, 5, formatRupiah(item.TotalPrice), "1", 1, "R", false, 0, "")
-	}
-
-	// 5. Footer Logic
-	if pdf.GetY() > lastPageItemsMaxY+6 {
-		pdf.AddPage()
 	}
 
 	pdf.Ln(1) // Reduced from 2
@@ -275,16 +269,16 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 
 	// Signature Block
 	pdf.SetY(pdf.GetY() + 1) // Reduced from 2
-	pdf.SetX(130)
+	pdf.SetX(150)
 	pdf.SetFont("Arial", "", 9)
 	pdf.CellFormat(60, 4, "Penanggung Jawab,", "", 1, "C", false, 0, "")
 
-	pdf.Ln(18) // Space for signature
+	pdf.Ln(14) // Space for signature
 
-	pdf.SetX(130)
+	pdf.SetX(150)
 	pdf.SetFont("Arial", "B", 9)
 	pdf.CellFormat(60, 4, fmt.Sprintf("( %s )", sanitizeLatin1(data.Penanggungjawab)), "", 1, "C", false, 0, "")
-	pdf.SetX(130)
+	pdf.SetX(150)
 	pdf.SetFont("Arial", "", 9)
 	pdf.CellFormat(60, 4, sanitizeLatin1(data.Jabatan), "", 1, "C", false, 0, "")
 

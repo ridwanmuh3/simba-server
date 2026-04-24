@@ -41,6 +41,20 @@ type InvoiceService struct {
 	validate *validator.Validate
 }
 
+type invoiceHistoryRow struct {
+	ID             uint
+	StockType      string
+	CompanyName    string
+	CompanyContact string
+	CompanyAddress string
+	InvoiceNumber  string
+	PONumber       string
+	QuoNumber      string
+	HasItems       bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 func NewInvoiceService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate) *InvoiceService {
 	return &InvoiceService{
 		db:       db,
@@ -255,20 +269,6 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 	if err := query.Count(&total).Error; err != nil {
 		s.log.Errorf("failed to count invoice records: %v", err)
 		return nil, 0, exception.InternalServerError
-	}
-
-	type invoiceHistoryRow struct {
-		ID             uint
-		StockType      string
-		CompanyName    string
-		CompanyContact string
-		CompanyAddress string
-		InvoiceNumber  string
-		PONumber       string
-		QuoNumber      string
-		HasItems       bool
-		CreatedAt      time.Time
-		UpdatedAt      time.Time
 	}
 
 	selectColumns := []string{
