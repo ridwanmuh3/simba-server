@@ -78,8 +78,26 @@ type InvoiceResponse struct {
 	UpdatedAt      time.Time `json:"updated_at,omitzero"`
 }
 
+type InvoiceItemResponse struct {
+	ID          uint    `json:"id"`
+	ItemName    string  `json:"item_name"`
+	Category    string  `json:"category"`
+	MeasureUnit string  `json:"measure_unit"`
+	Amount      float64 `json:"amount"`
+	UnitPrice   float64 `json:"unit_price"`
+	TotalPrice  float64 `json:"total_price"`
+	Supplier    string  `json:"supplier"`
+	StockType   string  `json:"stock_type"`
+}
+
+type InvoiceDetailResponse struct {
+	InvoiceResponse
+	Items      []InvoiceItemResponse `json:"items"`
+	GrandTotal float64               `json:"grand_total"`
+}
+
 type UpdateInvoiceRequest struct {
-	ID              uint   `param:"id"`
+	ID              uint  `param:"id"`
 	CompanyName     string `json:"company_name" validate:"required,min=2,max=100"`
 	CompanyAddress  string `json:"company_address" validate:"required,min=2,max=200"`
 	CompanyContact  string `json:"company_contact" validate:"required,min=2,max=100"`
@@ -90,6 +108,7 @@ type UpdateInvoiceRequest struct {
 	Penanggungjawab string `json:"penanggungjawab" validate:"omitempty,max=100"`
 	Jabatan         string `json:"jabatan" validate:"omitempty,max=100"`
 	BankAccount     string `json:"bank_account" validate:"omitempty,max=100"`
+	StockIDs        []int  `json:"stock_ids"`
 }
 
 type InvoiceData struct {

@@ -58,6 +58,7 @@ type InvoiceService interface {
 	SaveInvoice(ctx context.Context, request *model.GenerateInvoiceRequest, summary *model.InvoiceSummary) error
 	FindAllInvoices(ctx context.Context, request *model.FindAllInvoicesRequest) ([]model.InvoiceResponse, int64, error)
 	FindInvoiceByID(ctx context.Context, id uint) (*model.InvoiceData, error)
+	FindInvoiceDetail(ctx context.Context, id uint) (*model.InvoiceDetailResponse, error)
 	UpdateInvoice(ctx context.Context, request *model.UpdateInvoiceRequest) error
 	DeleteInvoice(ctx context.Context, id uint) error
 }
@@ -721,7 +722,12 @@ func (h *ItemHandler) DownloadInvoicePDF(c *fiber.Ctx) error {
 		}
 		return '_'
 	}, pdfData.InvoiceNo)
-	filename := url.PathEscape(fmt.Sprintf("invoice-%s.pdf", safeInvoiceNo))
+
+	label := "KELUAR"
+	if pdfData.StockType == "IN" {
+		label = "MASUK"
+	}
+	filename := url.PathEscape(fmt.Sprintf("INVOICE-BARANG %s-%s.pdf", label, safeInvoiceNo))
 
 	disposition := "attachment"
 	if strings.EqualFold(c.Query("mode"), "view") {
@@ -731,6 +737,26 @@ func (h *ItemHandler) DownloadInvoicePDF(c *fiber.Ctx) error {
 	c.Set("Content-Type", "application/pdf")
 	c.Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, filename))
 	return c.Send(pdfBuffer.Bytes())
+}
+
+func (h *ItemHandler) FindInvoiceDetail(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil || id == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid invoice id")
+	}
+
+	detail, err := h.invoiceService.FindInvoiceDetail(c.Context(), uint(id))
+	if err != nil {
+		h.log.Warnf("failed to get invoice detail %d: %v", id, err)
+		return err
+	}
+
+	return c.JSON(model.Response[*model.InvoiceDetailResponse]{
+		Status:  fiber.StatusOK,
+		Message: "get invoice detail success",
+		Data:    detail,
+	})
 }
 
 func (h *ItemHandler) UpdateInvoice(c *fiber.Ctx) error {

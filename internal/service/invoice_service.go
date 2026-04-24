@@ -235,6 +235,59 @@ func (s *InvoiceService) FindInvoiceByID(ctx context.Context, id uint) (*model.I
 	}, nil
 }
 
+func (s *InvoiceService) FindInvoiceDetail(ctx context.Context, id uint) (*model.InvoiceDetailResponse, error) {
+	db := s.db.WithContext(ctx)
+
+	var invoice entity.Invoice
+	if err := db.Preload("Items").First(&invoice, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
+		}
+		s.log.Errorf("failed to find invoice detail %d: %v", id, err)
+		return nil, exception.InternalServerError
+	}
+
+	items := make([]model.InvoiceItemResponse, len(invoice.Items))
+	for i, it := range invoice.Items {
+		items[i] = model.InvoiceItemResponse{
+			ID:          it.ID,
+			ItemName:    it.ItemName,
+			Category:    it.Category,
+			MeasureUnit: it.MeasureUnit,
+			Amount:      it.Amount,
+			UnitPrice:   it.UnitPrice,
+			TotalPrice:  it.TotalPrice,
+			Supplier:    it.Supplier,
+			StockType:   it.StockType,
+		}
+	}
+
+	return &model.InvoiceDetailResponse{
+		InvoiceResponse: model.InvoiceResponse{
+			ID:              invoice.ID,
+			StockType:       invoice.StockType,
+			CompanyName:     invoice.CompanyName,
+			CompanyContact:  invoice.CompanyContact,
+			CompanyAddress:  invoice.CompanyAddress,
+			InvoiceNumber:   invoice.InvoiceNumber,
+			PONumber:        invoice.PONumber,
+			QuoNumber:       invoice.QuoNumber,
+			ReceiverName:    invoice.ReceiverName,
+			ReceiverAddress: invoice.ReceiverAddress,
+			InvoiceDate:     invoice.InvoiceDate,
+			Keterangan:      invoice.Keterangan,
+			Penanggungjawab: invoice.Penanggungjawab,
+			Jabatan:         invoice.Jabatan,
+			BankAccount:     invoice.BankAccount,
+			HasItems:        len(invoice.Items) > 0,
+			CreatedAt:       invoice.CreatedAt,
+			UpdatedAt:       invoice.UpdatedAt,
+		},
+		Items:      items,
+		GrandTotal: invoice.GrandTotal,
+	}, nil
+}
+
 func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.FindAllInvoicesRequest) ([]model.InvoiceResponse, int64, error) {
 	db := s.db.WithContext(ctx)
 
@@ -365,6 +418,55 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 	invoice.Penanggungjawab = request.Penanggungjawab
 	invoice.Jabatan = request.Jabatan
 	invoice.BankAccount = request.BankAccount
+
+	if len(request.StockIDs) > 0 {
+		return db.Transaction(func(tx *gorm.DB) error {
+			var stocks []entity.StockTracking
+			if err := tx.Preload("Item").Where("id IN ?", request.StockIDs).Find(&stocks).Error; err != nil {
+				s.log.Errorf("failed to fetch stocks for invoice update %d: %v", request.ID, err)
+				return exception.InternalServerError
+			}
+
+			var grandTotal float64
+			newItems := make([]entity.InvoiceItem, len(stocks))
+			for i, stock := range stocks {
+				lineTotal := util.Round2(stock.Amount * stock.UnitPrice)
+				grandTotal = util.Round2(grandTotal + lineTotal)
+				newItems[i] = entity.InvoiceItem{
+					InvoiceID:     invoice.ID,
+					ItemID:        stock.Item.ID,
+					ItemName:      stock.Item.Name,
+					Category:      stock.Item.Category,
+					MeasureUnit:   stock.Item.MeasureUnit,
+					Amount:        stock.Amount,
+					UnitPrice:     stock.UnitPrice,
+					TotalPrice:    lineTotal,
+					PreviousStock: stock.PreviousStock,
+					NewStock:      stock.NewStock,
+					Supplier:      stock.Supplier,
+					StockType:     stock.Type,
+					CreatedAt:     stock.CreatedAt,
+				}
+			}
+			invoice.GrandTotal = grandTotal
+
+			if err := tx.Where("invoice_id = ?", invoice.ID).Delete(&entity.InvoiceItem{}).Error; err != nil {
+				s.log.Errorf("failed to delete old invoice items %d: %v", invoice.ID, err)
+				return exception.InternalServerError
+			}
+			if err := tx.Save(&invoice).Error; err != nil {
+				s.log.Errorf("failed to update invoice %d: %v", invoice.ID, err)
+				return exception.InternalServerError
+			}
+			if len(newItems) > 0 {
+				if err := tx.Create(&newItems).Error; err != nil {
+					s.log.Errorf("failed to create new invoice items %d: %v", invoice.ID, err)
+					return exception.InternalServerError
+				}
+			}
+			return nil
+		})
+	}
 
 	if err := db.Save(&invoice).Error; err != nil {
 		s.log.Errorf("failed to update invoice %d: %v", request.ID, err)
