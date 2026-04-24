@@ -27,7 +27,7 @@ type StockService struct {
 }
 
 type StockRepository interface {
-	Update(db *gorm.DB, entity *entity.Item, id any) error
+	Save(db *gorm.DB, entity *entity.Item) error
 	FindAllStocks(db *gorm.DB, query *model.FindAllStocksRequest) ([]entity.StockTracking, int64, error)
 }
 
@@ -158,11 +158,14 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 	}
 
 	if tr.NewStock < 0 {
-		return nil, fiber.NewError(fiber.StatusBadRequest, "stock cannot be negative")
+		tr.NewStock = 0
+	}
+	if item.Stock < 0 {
+		item.Stock = 0
 	}
 
 	// 6. SAVE ITEM
-	if err := s.itemRepository.Update(tx, item, item.ID); err != nil {
+	if err := s.itemRepository.Save(tx, item); err != nil {
 		return nil, exception.InternalServerError
 	}
 
