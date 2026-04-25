@@ -154,9 +154,10 @@ func (h *UserHandler) Current(c *fiber.Ctx) error {
 	}
 
 	authData := model.Auth{
-		ID:       response.ID,
-		Fullname: response.Fullname,
-		Role:     response.Role,
+		ID:             response.ID,
+		Fullname:       response.Fullname,
+		Role:           response.Role,
+		CurrentDapurID: auth.CurrentDapurID,
 	}
 
 	return c.JSON(model.Response[model.Auth]{

@@ -22,6 +22,7 @@ type AddFinanceRequest struct {
 	ExtraNote   string `json:"extra_note,omitempty" validate:"omitempty,max=255"`
 	ProofImage  string `json:"-" validate:"required"`
 	ModifiedBy  string `json:"-" validate:"required,min=2,max=50"`
+	DapurID     uint   `json:"-" validate:"required,min=1"`
 }
 
 type UpdateFinanceRequest struct {
@@ -33,14 +34,17 @@ type UpdateFinanceRequest struct {
 	ExtraNote   string `json:"extra_note,omitempty" validate:"omitempty,max=255"`
 	ProofImage  string `json:"-" validate:"omitempty"`
 	ModifiedBy  string `json:"-" validate:"required,min=2,max=50"`
+	DapurID     uint   `json:"-" validate:"required,min=1"`
 }
 
 type DeleteFinanceRequest struct {
-	ID int `param:"id" validate:"required,number"`
+	ID      int  `param:"id" validate:"required,number"`
+	DapurID uint `json:"-" validate:"required,min=1"`
 }
 
 type FindByIdFinanceRequest struct {
-	ID int `param:"id" validate:"required,number"`
+	ID      int  `param:"id" validate:"required,number"`
+	DapurID uint `json:"-" validate:"required,min=1"`
 }
 
 type FindAllFinanceRequest struct {
@@ -49,4 +53,5 @@ type FindAllFinanceRequest struct {
 	EndDate     string `query:"end_date,omitempty" validate:"omitempty"`
 	Page        int    `query:"page,omitempty" validate:"omitempty,min=1"`
 	Size        int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
+	DapurID     uint   `json:"-"`
 }

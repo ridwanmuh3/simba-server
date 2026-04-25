@@ -33,6 +33,7 @@ func Bootstrap(config *BootstrapConfig) {
 	financeRepository := repository.NewFinanceRepository()
 	dashboardRepository := repository.NewDashboardRepository()
 	settingRepository := repository.NewSettingRepository()
+	dapurRepository := repository.NewDapurRepository()
 
 	// services
 	userService := service.NewUserService(config.DB, config.Log, config.Validate, userRepository)
@@ -42,6 +43,7 @@ func Bootstrap(config *BootstrapConfig) {
 	financeService := service.NewFinanceService(config.DB, config.Log, config.Validate, financeRepository)
 	dashboardService := service.NewDashboardService(config.DB, config.Log, config.Validate, dashboardRepository)
 	settingService := service.NewSettingService(config.DB, settingRepository, config.Log, config.Validate)
+	dapurService := service.NewDapurService(config.DB, config.Log, config.Validate, dapurRepository, userRepository)
 
 	// handler
 	userHandler := handler.NewUserHandler(config.Config, config.Log, userService)
@@ -49,18 +51,22 @@ func Bootstrap(config *BootstrapConfig) {
 	financeHandler := handler.NewFinanceHandler(config.Config, config.Log, financeService)
 	dashboardHandler := handler.NewDashboardHandler(config.Config, config.Log, dashboardService)
 	settingHandler := handler.NewSettingHandler(config.Config, config.Log, config.Validate, settingService)
+	dapurHandler := handler.NewDapurHandler(config.Config, config.Log, dapurService)
 
 	authMiddleware := middleware.NewAuthMiddleware(config.Log, userService)
+	dapurRequiredMiddleware := middleware.NewDapurRequiredMiddleware(config.Log)
 
 	routeConfig := &route.RouteConfig{
-		App:              config.App,
-		UserHandler:      userHandler,
-		ItemHandler:      itemHandler,
-		FinanceHandler:   financeHandler,
-		DashboardHandler: dashboardHandler,
-		SettingHandler:   settingHandler,
-		AuthMiddleware:   authMiddleware,
-		Log:              config.Log,
+		App:                     config.App,
+		UserHandler:             userHandler,
+		ItemHandler:             itemHandler,
+		FinanceHandler:          financeHandler,
+		DashboardHandler:        dashboardHandler,
+		SettingHandler:          settingHandler,
+		DapurHandler:            dapurHandler,
+		AuthMiddleware:          authMiddleware,
+		DapurRequiredMiddleware: dapurRequiredMiddleware,
+		Log:                     config.Log,
 	}
 
 	SetupGlobalMiddlewares(config)

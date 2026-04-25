@@ -54,6 +54,7 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 		return nil, err
 	}
 
+	// ID sequence is global — IDs must be unique across all dapurs.
 	var lastItem entity.Item
 	err := tx.WithContext(ctx).Unscoped().Order("id DESC").First(&lastItem).Error
 
@@ -79,6 +80,7 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 		MeasureUnit:  request.MeasureUnit,
 		TotalPrice:   util.GetTotalPrice(stock, request.UnitPrice),
 		ModifiedBy:   request.ModifiedBy,
+		DapurID:      request.DapurID,
 	}
 	if request.DateAdded != nil {
 		item.CreatedAt = *request.DateAdded
@@ -94,6 +96,7 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 		Title:       "Bahan baru ditambahkan",
 		Description: fmt.Sprintf("%s - %g %s", item.Name, item.InitialStock, item.MeasureUnit),
 		ActionBy:    request.ModifiedBy,
+		DapurID:     request.DapurID,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return nil, exception.InternalServerError
@@ -148,6 +151,7 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 			UnitPrice:    reqItem.UnitPrice,
 			TotalPrice:   util.GetTotalPrice(reqItem.Stock, reqItem.UnitPrice),
 			ModifiedBy:   reqItem.ModifiedBy,
+			DapurID:      request.DapurID,
 		}
 		items = append(items, item)
 	}
@@ -164,6 +168,7 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 		Title:       "Import bahan baru ditambahkan",
 		Description: "Format CSV",
 		ActionBy:    request.Items[0].ModifiedBy,
+		DapurID:     request.DapurID,
 	}).Error; err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return exception.InternalServerError
@@ -188,7 +193,8 @@ func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemReque
 
 	item := new(entity.Item)
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(item, "id = ?", request.ID).Error; err != nil {
+		Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).
+		First(item).Error; err != nil {
 		s.log.Errorf("failed to find item by code: %v", err)
 		return nil, exception.ItemNotFoundError
 	}
@@ -202,13 +208,12 @@ func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemReque
 		item.CreatedAt = *request.DateAdded
 	}
 
-	// Allow correcting initial stock entry errors and sync running stock / tracks.
 	if request.InitialStock != nil {
 		item.InitialStock = util.Round4(*request.InitialStock)
 	}
 
 	var stockTracks []entity.StockTracking
-	if err := tx.Where("item_id = ?", item.ID).
+	if err := tx.Where("item_id = ? AND dapur_id = ? AND deleted_at IS NULL", item.ID, request.DapurID).
 		Order("created_at ASC").
 		Find(&stockTracks).Error; err != nil {
 		s.log.Errorf("failed to fetch stock tracking records: %v", err)
@@ -283,14 +288,14 @@ func (s *ItemService) Delete(ctx context.Context, request *model.DeleteItemReque
 	item := new(entity.Item)
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ?", request.ID).
+		Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).
 		First(item).Error; err != nil {
 		return false, exception.ItemNotFoundError
 	}
 
 	if err := tx.
 		Unscoped().
-		Where("item_id = ?", item.ID).
+		Where("item_id = ? AND dapur_id = ?", item.ID, request.DapurID).
 		Delete(&entity.StockTracking{}).Error; err != nil {
 		return false, exception.InternalServerError
 	}
@@ -304,6 +309,7 @@ func (s *ItemService) Delete(ctx context.Context, request *model.DeleteItemReque
 		Title:       "Data bahan dihapus permanen",
 		Description: item.Name,
 		ActionBy:    request.ID,
+		DapurID:     request.DapurID,
 	}).Error; err != nil {
 		return false, exception.InternalServerError
 	}
@@ -324,7 +330,7 @@ func (s *ItemService) FindById(ctx context.Context, request *model.FindByIdItemR
 	}
 
 	item := new(entity.Item)
-	if err := s.itemRepository.FindById(db, item, request.ID); err != nil {
+	if err := db.Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).Take(item).Error; err != nil {
 		s.log.Errorf("failed to find item by id: %v", err)
 		return nil, exception.ItemNotFoundError
 	}
@@ -354,12 +360,12 @@ func (s *ItemService) FindAll(ctx context.Context, request *model.FindAllItemsRe
 	return responses, total, nil
 }
 
-func (s *ItemService) GetItemCategories(ctx context.Context) ([]string, error) {
+func (s *ItemService) GetItemCategories(ctx context.Context, dapurID uint) ([]string, error) {
 	db := s.db.WithContext(ctx)
 
 	var categories []string
 	if err := db.Model(new(entity.Item)).
-		Where("category != ''").
+		Where("dapur_id = ? AND category != ''", dapurID).
 		Distinct("category").
 		Order("category ASC").
 		Pluck("category", &categories).Error; err != nil {
@@ -370,11 +376,13 @@ func (s *ItemService) GetItemCategories(ctx context.Context) ([]string, error) {
 	return categories, nil
 }
 
-func (s *ItemService) ExportItems(ctx context.Context) ([]model.ItemResponse, int, error) {
+func (s *ItemService) ExportItems(ctx context.Context, dapurID uint) ([]model.ItemResponse, int, error) {
 	db := s.db.WithContext(ctx)
 
 	var items []entity.Item
-	if err := db.Model(new(entity.Item)).Order("created_at DESC").Find(&items).Error; err != nil {
+	if err := db.Model(new(entity.Item)).
+		Where("dapur_id = ?", dapurID).
+		Order("created_at DESC").Find(&items).Error; err != nil {
 		s.log.Errorf("failed to export all items: %v", err)
 		return nil, 0, exception.InternalServerError
 	}

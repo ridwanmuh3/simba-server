@@ -186,8 +186,9 @@ func (s *UserService) Verify(ctx context.Context, request *model.VerifyUserReque
 	}
 
 	return &model.Auth{
-		ID:       int(user.ID),
-		Fullname: user.Fullname,
-		Role:     user.Role,
+		ID:             int(user.ID),
+		Fullname:       user.Fullname,
+		Role:           user.Role,
+		CurrentDapurID: user.CurrentDapurID,
 	}, nil
 }

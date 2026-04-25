@@ -193,7 +193,8 @@ func (h *FinanceHandler) Update(c *fiber.Ctx) error {
 }
 
 func (h *FinanceHandler) Export(c *fiber.Ctx) error {
-	finances, _, err := h.financeService.Export(c.Context())
+	auth := middleware.GetAuthUser(c)
+	finances, _, err := h.financeService.Export(c.Context(), *auth.CurrentDapurID)
 	if err != nil {
 		h.log.Warnf("failed to find all finances data: %v", err)
 		return err

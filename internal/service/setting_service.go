@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -14,6 +13,7 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/repository"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"strconv"
 )
 
 type SettingService struct {
@@ -24,9 +24,9 @@ type SettingService struct {
 }
 
 type SettingRepository interface {
-	GetByKey(db *gorm.DB, key string) (*entity.AppSetting, error)
+	GetByKey(db *gorm.DB, key string, dapurID uint) (*entity.AppSetting, error)
 	Save(db *gorm.DB, setting *entity.AppSetting) error
-	IncrementSequence(db *gorm.DB, key string) (int, error)
+	IncrementSequence(db *gorm.DB, key string, dapurID uint) (int, error)
 }
 
 var _ SettingRepository = (*repository.SettingRepository)(nil)
@@ -41,14 +41,14 @@ func NewSettingService(db *gorm.DB, settingRepo SettingRepository, log *zap.Suga
 }
 
 const (
-	KeyCompanyName      = "company_name"
-	KeyCompanyAddress   = "company_address"
-	KeyCompanyContact   = "company_contact"
-	KeyBankAccount      = "bank_account"
-	KeyPenanggungjawab  = "penanggungjawab"
-	KeyJabatan          = "jabatan"
-	KeySeqInvoice       = "seq_invoice"
-	KeySeqQuotation     = "seq_quotation"
+	KeyCompanyName     = "company_name"
+	KeyCompanyAddress  = "company_address"
+	KeyCompanyContact  = "company_contact"
+	KeyBankAccount     = "bank_account"
+	KeyPenanggungjawab = "penanggungjawab"
+	KeyJabatan         = "jabatan"
+	KeySeqInvoice      = "seq_invoice"
+	KeySeqQuotation    = "seq_quotation"
 )
 
 const DefaultBankAccount = "BNI 2048441550 A.N Koperasi Konsumen Dewa Makmur Multi Sejahtera"
@@ -76,11 +76,14 @@ func parseDocumentSequence(value, prefix string) (int, bool) {
 	return seq, true
 }
 
-func (s *SettingService) getDocumentSequenceMax(ctx context.Context) (int, int, error) {
+func (s *SettingService) getDocumentSequenceMax(ctx context.Context, dapurID uint) (int, int, error) {
 	db := s.db.WithContext(ctx)
 
 	var invoices []entity.Invoice
-	if err := db.Model(new(entity.Invoice)).Select("invoice_number, quo_number").Find(&invoices).Error; err != nil {
+	if err := db.Model(new(entity.Invoice)).
+		Select("invoice_number, quo_number").
+		Where("dapur_id = ?", dapurID).
+		Find(&invoices).Error; err != nil {
 		s.log.Errorf("failed to scan invoice history for sequence: %v", err)
 		return 0, 0, exception.InternalServerError
 	}
@@ -99,15 +102,15 @@ func (s *SettingService) getDocumentSequenceMax(ctx context.Context) (int, int, 
 	return maxInvoice, maxQuotation, nil
 }
 
-func (s *SettingService) GetCompanyProfile(ctx context.Context) (*model.CompanyProfileResponse, error) {
+func (s *SettingService) GetCompanyProfile(ctx context.Context, dapurID uint) (*model.CompanyProfileResponse, error) {
 	db := s.db.WithContext(ctx)
 
-	name, _ := s.settingRepo.GetByKey(db, KeyCompanyName)
-	address, _ := s.settingRepo.GetByKey(db, KeyCompanyAddress)
-	contact, _ := s.settingRepo.GetByKey(db, KeyCompanyContact)
-	bank, _ := s.settingRepo.GetByKey(db, KeyBankAccount)
-	pj, _ := s.settingRepo.GetByKey(db, KeyPenanggungjawab)
-	jabatan, _ := s.settingRepo.GetByKey(db, KeyJabatan)
+	name, _ := s.settingRepo.GetByKey(db, KeyCompanyName, dapurID)
+	address, _ := s.settingRepo.GetByKey(db, KeyCompanyAddress, dapurID)
+	contact, _ := s.settingRepo.GetByKey(db, KeyCompanyContact, dapurID)
+	bank, _ := s.settingRepo.GetByKey(db, KeyBankAccount, dapurID)
+	pj, _ := s.settingRepo.GetByKey(db, KeyPenanggungjawab, dapurID)
+	jabatan, _ := s.settingRepo.GetByKey(db, KeyJabatan, dapurID)
 
 	resp := &model.CompanyProfileResponse{
 		BankAccount: DefaultBankAccount,
@@ -134,7 +137,7 @@ func (s *SettingService) GetCompanyProfile(ctx context.Context) (*model.CompanyP
 	return resp, nil
 }
 
-func (s *SettingService) UpdateCompanyProfile(ctx context.Context, req *model.CompanyProfileRequest) error {
+func (s *SettingService) UpdateCompanyProfile(ctx context.Context, req *model.CompanyProfileRequest, dapurID uint) error {
 	db := s.db.WithContext(ctx)
 
 	if err := s.validate.Struct(req); err != nil {
@@ -142,30 +145,26 @@ func (s *SettingService) UpdateCompanyProfile(ctx context.Context, req *model.Co
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyCompanyName, Value: req.CompanyName}); err != nil {
-		return err
+	saves := []entity.AppSetting{
+		{Key: KeyCompanyName, Value: req.CompanyName, DapurID: dapurID},
+		{Key: KeyCompanyAddress, Value: req.CompanyAddress, DapurID: dapurID},
+		{Key: KeyCompanyContact, Value: req.CompanyContact, DapurID: dapurID},
+		{Key: KeyBankAccount, Value: req.BankAccount, DapurID: dapurID},
+		{Key: KeyPenanggungjawab, Value: req.Penanggungjawab, DapurID: dapurID},
+		{Key: KeyJabatan, Value: req.Jabatan, DapurID: dapurID},
 	}
-	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyCompanyAddress, Value: req.CompanyAddress}); err != nil {
-		return err
-	}
-	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyCompanyContact, Value: req.CompanyContact}); err != nil {
-		return err
-	}
-	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyBankAccount, Value: req.BankAccount}); err != nil {
-		return err
-	}
-	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyPenanggungjawab, Value: req.Penanggungjawab}); err != nil {
-		return err
-	}
-	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeyJabatan, Value: req.Jabatan}); err != nil {
-		return err
+
+	for i := range saves {
+		if err := s.settingRepo.Save(db, &saves[i]); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (s *SettingService) GetNextDocumentNumbers(ctx context.Context) (*model.DocumentSequenceResponse, error) {
-	invSeq, quoSeq, err := s.getDocumentSequenceMax(ctx)
+func (s *SettingService) GetNextDocumentNumbers(ctx context.Context, dapurID uint) (*model.DocumentSequenceResponse, error) {
+	invSeq, quoSeq, err := s.getDocumentSequenceMax(ctx, dapurID)
 	if err != nil {
 		return nil, err
 	}
@@ -179,20 +178,20 @@ func (s *SettingService) GetNextDocumentNumbers(ctx context.Context) (*model.Doc
 	}, nil
 }
 
-func (s *SettingService) ConsumeDocumentNumbers(ctx context.Context) error {
+func (s *SettingService) ConsumeDocumentNumbers(ctx context.Context, dapurID uint) error {
 	db := s.db.WithContext(ctx)
 
-	invSeq, quoSeq, err := s.getDocumentSequenceMax(ctx)
+	invSeq, quoSeq, err := s.getDocumentSequenceMax(ctx, dapurID)
 	if err != nil {
 		return err
 	}
 
-	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeySeqInvoice, Value: fmt.Sprintf("%d", invSeq)}); err != nil {
+	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeySeqInvoice, Value: fmt.Sprintf("%d", invSeq), DapurID: dapurID}); err != nil {
 		s.log.Errorf("failed to sync invoice seq: %v", err)
 		return exception.InternalServerError
 	}
 
-	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeySeqQuotation, Value: fmt.Sprintf("%d", quoSeq)}); err != nil {
+	if err := s.settingRepo.Save(db, &entity.AppSetting{Key: KeySeqQuotation, Value: fmt.Sprintf("%d", quoSeq), DapurID: dapurID}); err != nil {
 		s.log.Errorf("failed to sync quo seq: %v", err)
 		return exception.InternalServerError
 	}

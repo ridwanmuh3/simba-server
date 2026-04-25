@@ -41,6 +41,7 @@ func NewStockService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator
 		itemRepository: itemRepository,
 	}
 }
+
 func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateItemStockRequest) (*model.StockResponse, error) {
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
@@ -56,33 +57,30 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		request.Supplier = "-"
 	}
 
-	// 2. LOCK ITEM
+	// 2. LOCK ITEM — scoped to dapur
 	item := new(entity.Item)
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(item, "id = ?", request.ID).Error; err != nil {
+		Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).
+		First(item).Error; err != nil {
 		return nil, exception.ItemNotFoundError
 	}
 
-	// 3. GET LAST TRACKING (DETERMINISTIC)
+	// 3. GET LAST TRACKING (DETERMINISTIC) — scoped to dapur
 	var last entity.StockTracking
 	err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("item_id = ? AND deleted_at IS NULL", item.ID).
-		Order("created_at DESC, id DESC"). // 🔥 penting (hindari collision)
+		Where("item_id = ? AND dapur_id = ? AND deleted_at IS NULL", item.ID, request.DapurID).
+		Order("created_at DESC, id DESC").
 		First(&last).Error
 
 	var previousStock float64
 	var currentTotalPrice float64
 
 	if err == nil {
-		// 🔥 source of truth dari tracking terakhir
 		previousStock = last.NewStock
-
-		// totalPrice tetap dari item (karena itu agregat resmi)
 		currentTotalPrice = item.TotalPrice
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
-		// no tracking yet — use item master as baseline
 		previousStock = item.Stock
 		currentTotalPrice = item.TotalPrice
 	} else {
@@ -98,9 +96,10 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		Amount:        request.Amount,
 		UnitPrice:     request.UnitPrice,
 		Supplier:      request.Supplier,
+		DapurID:       request.DapurID,
 	}
 
-	// 5. CORE (MAC SAFE, BASED ON previousStock)
+	// 5. CORE
 	switch request.Type {
 
 	case "IN":
@@ -113,16 +112,13 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		tr.NewStock = newStock
 		tr.TotalPrice = addedTotal
 
-		// UPDATE: stock always set to 0 if negative
 	case "OUT":
 		amount := request.Amount
 
-		// Jika stok sudah 0 → tidak perlu error, cukup no-op
 		if previousStock == 0 {
 			amount = 0
 		}
 
-		// Clamp agar tidak overdraw
 		if amount > previousStock {
 			amount = previousStock
 		}
@@ -139,8 +135,8 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 			newStock = 0
 		}
 
-		deduction := util.Round2(avg * amount)               // MAC (inventory)
-		lineTotal := util.Round2(amount * request.UnitPrice) // invoice
+		deduction := util.Round2(avg * amount)
+		lineTotal := util.Round2(amount * request.UnitPrice)
 
 		newTotalPrice := util.Round2(currentTotalPrice - deduction)
 		if newTotalPrice < 0 {
@@ -186,6 +182,7 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 			item.MeasureUnit,
 		),
 		ActionBy: request.ModifiedBy,
+		DapurID:  request.DapurID,
 	}).Error; err != nil {
 		return nil, exception.InternalServerError
 	}
@@ -197,6 +194,7 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 
 	return converter.StockToResponse(tr), nil
 }
+
 func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRequest) (*model.StockResponse, error) {
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
@@ -209,19 +207,20 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 		request.Supplier = "-"
 	}
 
-	// 2. LOCK ITEM
+	// 2. LOCK ITEM — scoped to dapur
 	item := new(entity.Item)
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(item, "id = ?", request.ID).Error; err != nil {
+		Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).
+		First(item).Error; err != nil {
 		return nil, exception.ItemNotFoundError
 	}
 
-	// 3. LOCK & MUTATE TARGET TRACKING
+	// 3. LOCK & MUTATE TARGET TRACKING — scoped to dapur
 	stock := new(entity.StockTracking)
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND item_id = ?", request.StockID, request.ID).
+		Where("id = ? AND item_id = ? AND dapur_id = ?", request.StockID, request.ID, request.DapurID).
 		First(stock).Error; err != nil {
 		return nil, exception.ItemNotFoundError
 	}
@@ -240,11 +239,11 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 		return nil, exception.InternalServerError
 	}
 
-	// 4. GET ALL TRACKING IN ORDER
+	// 4. GET ALL TRACKING IN ORDER — scoped to dapur
 	var tracks []entity.StockTracking
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("item_id = ?", item.ID).
+		Where("item_id = ? AND dapur_id = ?", item.ID, request.DapurID).
 		Order("created_at ASC, id ASC").
 		Find(&tracks).Error; err != nil {
 		return nil, exception.InternalServerError
@@ -270,11 +269,9 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 
 			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
 
-			// UPDATE: stock always set to 0 if negative
 		case "OUT":
 			amount := tracks[i].Amount
 
-			// Clamp agar tidak melebihi stok tersedia
 			if amount > prev {
 				amount = prev
 			}
@@ -299,9 +296,13 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 				totalPrice = 0
 			}
 
-			// gunakan amount hasil clamp, bukan original
 			tracks[i].TotalPrice = lineTotal
 			tracks[i].NewStock = runningStock
+		}
+
+		if tracks[i].ID == uint(request.StockID) {
+			t := tracks[i]
+			updatedTarget = &t
 		}
 	}
 
@@ -340,6 +341,7 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 			item.MeasureUnit,
 		),
 		ActionBy: request.ModifiedBy,
+		DapurID:  request.DapurID,
 	}).Error; err != nil {
 		return nil, exception.InternalServerError
 	}
@@ -365,19 +367,20 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 		return false, err
 	}
 
-	// 2. LOCK ITEM
+	// 2. LOCK ITEM — scoped to dapur
 	item := new(entity.Item)
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(item, "id = ?", request.ID).Error; err != nil {
+		Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).
+		First(item).Error; err != nil {
 		return false, exception.ItemNotFoundError
 	}
 
-	// 3. GET TARGET TRACKING
+	// 3. GET TARGET TRACKING — scoped to dapur
 	stock := new(entity.StockTracking)
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND item_id = ?", request.StockID, request.ID).
+		Where("id = ? AND item_id = ? AND dapur_id = ?", request.StockID, request.ID, request.DapurID).
 		First(stock).Error; err != nil {
 		return false, exception.ItemNotFoundError
 	}
@@ -389,17 +392,17 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 		return false, exception.InternalServerError
 	}
 
-	// 5. GET ALL TRACKING (ORDER FIX)
+	// 5. GET ALL REMAINING TRACKING — scoped to dapur
 	var tracks []entity.StockTracking
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("item_id = ?", item.ID).
-		Order("created_at ASC, id ASC"). // 🔥 penting
+		Where("item_id = ? AND dapur_id = ?", item.ID, request.DapurID).
+		Order("created_at ASC, id ASC").
 		Find(&tracks).Error; err != nil {
 		return false, exception.InternalServerError
 	}
 
-	// 6. REBUILD MAC (seed from InitialStock/UnitPrice so items without IN-tracking don't break)
+	// 6. REBUILD MAC
 	var runningStock float64 = item.InitialStock
 	var totalPrice float64 = util.Round2(item.InitialStock * item.UnitPrice)
 
@@ -417,11 +420,9 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 
 			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
 
-			// UPDATE: stock always set to 0 if negative
 		case "OUT":
 			amount := tracks[i].Amount
 
-			// Clamp amount agar tidak melebihi stok
 			if amount > prev {
 				amount = prev
 			}
@@ -490,6 +491,7 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 			item.MeasureUnit,
 		),
 		ActionBy: request.ModifiedBy,
+		DapurID:  request.DapurID,
 	}).Error; err != nil {
 		return false, exception.InternalServerError
 	}
@@ -519,40 +521,32 @@ func (s *StockService) FindAllStocks(ctx context.Context, request *model.FindAll
 	return responses, total, nil
 }
 
-func (s *StockService) GetStocksFinanceSummary(ctx context.Context) (*model.StocksFinanceSummaryResponse, error) {
+func (s *StockService) GetStocksFinanceSummary(ctx context.Context, dapurID uint) (*model.StocksFinanceSummaryResponse, error) {
 	db := s.db.WithContext(ctx)
 
 	var (
 		masterItemsTotalBudget float64
 		cost                   float64
 		revenue                float64
-		profit                 float64
-		currentBudget          float64
 	)
 
-	db.
-		Model(new(entity.Item)).
+	db.Model(new(entity.Item)).
 		Select("COALESCE(SUM(total_price),0)").
-		Where("deleted_at IS NULL").
+		Where("dapur_id = ? AND deleted_at IS NULL", dapurID).
 		Scan(&masterItemsTotalBudget)
 
-	db.
-		Model(new(entity.StockTracking)).
+	db.Model(new(entity.StockTracking)).
 		Select("COALESCE(SUM(amount * unit_price),0)").
-		Where("type = ?", "IN").
-		Where("deleted_at IS NULL").
+		Where("type = ? AND dapur_id = ? AND deleted_at IS NULL", "IN", dapurID).
 		Scan(&cost)
 
-	db.
-		Model(new(entity.StockTracking)).
+	db.Model(new(entity.StockTracking)).
 		Select("COALESCE(SUM(amount * unit_price),0)").
-		Where("type = ?", "OUT").
-		Where("deleted_at IS NULL").
+		Where("type = ? AND dapur_id = ? AND deleted_at IS NULL", "OUT", dapurID).
 		Scan(&revenue)
 
-	profit = revenue - cost
-
-	currentBudget = masterItemsTotalBudget + profit
+	profit := revenue - cost
+	currentBudget := masterItemsTotalBudget + profit
 
 	return &model.StocksFinanceSummaryResponse{
 		MasterItemsTotalBudget: masterItemsTotalBudget,
@@ -575,13 +569,12 @@ func (s *StockService) GetItemStocksSummary(ctx context.Context, request *model.
 	var total int64
 	offset := (request.Page - 1) * request.Size
 
-	baseQuery := db.Table("items").Where("items.deleted_at IS NULL")
+	baseQuery := db.Table("items").Where("items.deleted_at IS NULL AND items.dapur_id = ?", request.DapurID)
 
 	if request.SearchQuery != "" {
 		baseQuery = baseQuery.Where("items.name LIKE ?", "%"+request.SearchQuery+"%")
 	}
 
-	// Hitung total data untuk pagination
 	err := baseQuery.Count(&total).Error
 	if err != nil {
 		s.log.Errorf("failed to count items summary: %v", err)
@@ -592,7 +585,6 @@ func (s *StockService) GetItemStocksSummary(ctx context.Context, request *model.
 		return []model.ItemStocksSummaryResponse{}, 0, nil
 	}
 
-	// Eksekusi query utama dengan kalkulasi dinamis
 	err = baseQuery.
 		Select(`
             items.id AS item_id,
@@ -602,31 +594,24 @@ func (s *StockService) GetItemStocksSummary(ctx context.Context, request *model.
             items.stock AS current_stock,
             items.total_price AS stock_value,
             items.initial_stock AS initial_stock,
-            
-            -- Kalkulasi Harga Beli Rata-rata (Total Uang Masuk / Total Qty Masuk)
-            -- Jika belum ada transaksi IN, fallback ke items.unit_price
             COALESCE(
-                SUM(CASE WHEN st.type = 'IN' THEN st.total_price ELSE 0 END) / 
-                NULLIF(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0), 
-            items.unit_price) AS buy_price, 
-
-            -- Kalkulasi Harga Jual Rata-rata (Total Uang Keluar / Total Qty Keluar)
-            -- Jika belum ada transaksi OUT, fallback ke 0
+                SUM(CASE WHEN st.type = 'IN' THEN st.total_price ELSE 0 END) /
+                NULLIF(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0),
+            items.unit_price) AS buy_price,
             COALESCE(
-                SUM(CASE WHEN st.type = 'OUT' THEN st.total_price ELSE 0 END) / 
-                NULLIF(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0), 
+                SUM(CASE WHEN st.type = 'OUT' THEN st.total_price ELSE 0 END) /
+                NULLIF(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0),
             0) AS sell_price,
-
             COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0) AS total_in,
             COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0) AS total_out
         `).
-		Joins("LEFT JOIN stock_tracks st ON st.item_id = items.id AND st.deleted_at IS NULL").
+		Joins("LEFT JOIN stock_tracks st ON st.item_id = items.id AND st.deleted_at IS NULL AND st.dapur_id = ?", request.DapurID).
 		Group(`
-            items.id, 
-            items.name, 
-            items.category, 
-            items.measure_unit, 
-            items.stock, 
+            items.id,
+            items.name,
+            items.category,
+            items.measure_unit,
+            items.stock,
             items.total_price,
             items.initial_stock,
             items.unit_price

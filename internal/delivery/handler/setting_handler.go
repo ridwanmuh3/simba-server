@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
+	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/service"
 	"github.com/spf13/viper"
@@ -26,7 +27,9 @@ func NewSettingHandler(config *viper.Viper, logger *zap.SugaredLogger, validate 
 }
 
 func (h *SettingHandler) GetCompanyProfile(c *fiber.Ctx) error {
-	response, err := h.settingService.GetCompanyProfile(c.Context())
+	auth := middleware.GetAuthUser(c)
+
+	response, err := h.settingService.GetCompanyProfile(c.Context(), *auth.CurrentDapurID)
 	if err != nil {
 		h.log.Warnf("failed to get company profile: %v", err)
 		return err
@@ -40,13 +43,15 @@ func (h *SettingHandler) GetCompanyProfile(c *fiber.Ctx) error {
 }
 
 func (h *SettingHandler) UpdateCompanyProfile(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	request := new(model.CompanyProfileRequest)
 	if err := c.BodyParser(request); err != nil {
 		h.log.Warnf("failed to parse request body: %v", err)
 		return err
 	}
 
-	if err := h.settingService.UpdateCompanyProfile(c.Context(), request); err != nil {
+	if err := h.settingService.UpdateCompanyProfile(c.Context(), request, *auth.CurrentDapurID); err != nil {
 		h.log.Warnf("failed to update company profile: %v", err)
 		return err
 	}
@@ -59,7 +64,9 @@ func (h *SettingHandler) UpdateCompanyProfile(c *fiber.Ctx) error {
 }
 
 func (h *SettingHandler) GetNextDocumentNumbers(c *fiber.Ctx) error {
-	response, err := h.settingService.GetNextDocumentNumbers(c.Context())
+	auth := middleware.GetAuthUser(c)
+
+	response, err := h.settingService.GetNextDocumentNumbers(c.Context(), *auth.CurrentDapurID)
 	if err != nil {
 		h.log.Warnf("failed to get next document numbers: %v", err)
 		return err

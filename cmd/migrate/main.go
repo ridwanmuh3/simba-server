@@ -28,6 +28,7 @@ func main() {
 	}
 
 	if err := db.AutoMigrate(
+		&entity.Dapur{},
 		&entity.User{},
 		&entity.Item{},
 		&entity.StockTracking{},

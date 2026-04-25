@@ -83,7 +83,9 @@ func (s *InvoiceService) GetInvoiceItems(ctx context.Context, request *model.Get
 	if stockType == "" {
 		stockType = "OUT"
 	}
-	query := db.Model(new(entity.StockTracking)).Preload("Item").Where("type = ?", stockType)
+
+	query := db.Model(new(entity.StockTracking)).Preload("Item").
+		Where("type = ? AND dapur_id = ?", stockType, request.DapurID)
 
 	if len(request.StockIDs) > 0 {
 		query = query.Where("id IN ?", request.StockIDs)
@@ -133,6 +135,7 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 	db := s.db.WithContext(ctx)
 
 	invoice := entity.Invoice{
+		DapurID:         request.DapurID,
 		StockType:       request.StockType,
 		CompanyName:     request.CompanyName,
 		CompanyContact:  request.CompanyContact,
@@ -181,11 +184,11 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 	return nil
 }
 
-func (s *InvoiceService) FindInvoiceByID(ctx context.Context, id uint) (*model.InvoiceData, error) {
+func (s *InvoiceService) FindInvoiceByID(ctx context.Context, id uint, dapurID uint) (*model.InvoiceData, error) {
 	db := s.db.WithContext(ctx)
 
 	var invoice entity.Invoice
-	if err := db.Preload("Items").First(&invoice, id).Error; err != nil {
+	if err := db.Preload("Items").Where("id = ? AND dapur_id = ?", id, dapurID).First(&invoice).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
 		}
@@ -235,11 +238,11 @@ func (s *InvoiceService) FindInvoiceByID(ctx context.Context, id uint) (*model.I
 	}, nil
 }
 
-func (s *InvoiceService) FindInvoiceDetail(ctx context.Context, id uint) (*model.InvoiceDetailResponse, error) {
+func (s *InvoiceService) FindInvoiceDetail(ctx context.Context, id uint, dapurID uint) (*model.InvoiceDetailResponse, error) {
 	db := s.db.WithContext(ctx)
 
 	var invoice entity.Invoice
-	if err := db.Preload("Items").First(&invoice, id).Error; err != nil {
+	if err := db.Preload("Items").Where("id = ? AND dapur_id = ?", id, dapurID).First(&invoice).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
 		}
@@ -301,7 +304,7 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 		size = 10
 	}
 
-	query := db.Table("invoices")
+	query := db.Table("invoices").Where("dapur_id = ?", request.DapurID)
 
 	if request.SearchQuery != "" {
 		search := "%" + request.SearchQuery + "%"
@@ -337,6 +340,7 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 
 	selectColumns := []string{
 		"invoices.id",
+		"invoices.stock_type",
 		"invoices.company_name",
 		"invoices.company_contact",
 		"invoices.company_address",
@@ -353,9 +357,6 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 		"invoices.created_at",
 		"invoices.updated_at",
 		"EXISTS (SELECT 1 FROM invoice_items WHERE invoice_items.invoice_id = invoices.id) AS has_items",
-	}
-	if db.Migrator().HasColumn(&entity.Invoice{}, "stock_type") {
-		selectColumns = append([]string{"invoices.stock_type"}, selectColumns...)
 	}
 
 	var invoices []invoiceHistoryRow
@@ -400,7 +401,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 	db := s.db.WithContext(ctx)
 
 	var invoice entity.Invoice
-	if err := db.First(&invoice, request.ID).Error; err != nil {
+	if err := db.Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).First(&invoice).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
 		}
@@ -422,7 +423,9 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 	if len(request.StockIDs) > 0 {
 		return db.Transaction(func(tx *gorm.DB) error {
 			var stocks []entity.StockTracking
-			if err := tx.Preload("Item").Where("id IN ?", request.StockIDs).Find(&stocks).Error; err != nil {
+			if err := tx.Preload("Item").
+				Where("id IN ? AND dapur_id = ?", request.StockIDs, request.DapurID).
+				Find(&stocks).Error; err != nil {
 				s.log.Errorf("failed to fetch stocks for invoice update %d: %v", request.ID, err)
 				return exception.InternalServerError
 			}
@@ -476,11 +479,13 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 	return nil
 }
 
-func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint) error {
+func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint, dapurID uint) error {
 	db := s.db.WithContext(ctx)
 
 	var count int64
-	if err := db.Model(&entity.Invoice{}).Where("id = ?", id).Count(&count).Error; err != nil {
+	if err := db.Model(&entity.Invoice{}).
+		Where("id = ? AND dapur_id = ?", id, dapurID).
+		Count(&count).Error; err != nil {
 		s.log.Errorf("failed to check invoice %d: %v", id, err)
 		return exception.InternalServerError
 	}
@@ -493,7 +498,7 @@ func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint) error {
 			s.log.Errorf("failed to delete invoice items for invoice %d: %v", id, err)
 			return exception.InternalServerError
 		}
-		if err := tx.Delete(&entity.Invoice{}, id).Error; err != nil {
+		if err := tx.Delete(&entity.Invoice{}, "id = ? AND dapur_id = ?", id, dapurID).Error; err != nil {
 			s.log.Errorf("failed to delete invoice %d: %v", id, err)
 			return exception.InternalServerError
 		}

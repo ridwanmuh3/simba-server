@@ -16,6 +16,7 @@ type Item struct {
 	UnitPrice    float64 `gorm:"not null"`
 	TotalPrice   float64 `gorm:"not null"`
 	ModifiedBy   string  `gorm:"size:50;not null"`
+	DapurID      uint    `gorm:"not null;index"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    gorm.DeletedAt `gorm:"index"`

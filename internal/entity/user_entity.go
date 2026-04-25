@@ -18,6 +18,7 @@ type User struct {
 	RefreshExpiresAt time.Time
 	IsActive         bool `gorm:"type:boolean;default:false"`
 	LastActive       time.Time
+	CurrentDapurID   *uint `gorm:"index"`
 }
 
 func (u *User) TableName() string {

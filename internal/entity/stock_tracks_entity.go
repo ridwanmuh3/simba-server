@@ -12,6 +12,7 @@ type StockTracking struct {
 	TotalPrice    float64 `gorm:"not null"`
 	Supplier      string  `gorm:"size:100;not null"`
 	ModifiedBy    string  `gorm:"size:50;not null"`
+	DapurID       uint    `gorm:"not null;index"`
 	ItemID        string  `gorm:"size:30;not null;index"`
 	Item          Item    `gorm:"foreignKey:ItemID;references:ID;constraint:OnUpdate:CASCADE;OnDelete:CASCADE"`
 }

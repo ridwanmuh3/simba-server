@@ -98,6 +98,7 @@ type InvoiceDetailResponse struct {
 
 type UpdateInvoiceRequest struct {
 	ID              uint  `param:"id"`
+	DapurID         uint  `json:"-" validate:"required,min=1"`
 	CompanyName     string `json:"company_name" validate:"required,min=2,max=100"`
 	CompanyAddress  string `json:"company_address" validate:"required,min=2,max=200"`
 	CompanyContact  string `json:"company_contact" validate:"required,min=2,max=100"`
@@ -164,6 +165,7 @@ type GenerateInvoiceRequest struct {
 	Penanggungjawab string `json:"penanggungjawab" validate:"required,min=2,max=100"`
 	Jabatan         string `json:"jabatan" validate:"required,min=2,max=100"`
 	BankAccount     string `json:"bank_account" validate:"omitempty,max=100"`
+	DapurID         uint   `json:"-" validate:"required,min=1"`
 }
 type AddItemRequest struct {
 	Name        string     `json:"name" validate:"required,min=1,max=90"`
@@ -173,10 +175,12 @@ type AddItemRequest struct {
 	UnitPrice   float64    `json:"unit_price" validate:"required,numeric,gt=0"`
 	DateAdded   *time.Time `json:"date_added,omitempty" validate:"omitempty"`
 	ModifiedBy  string     `json:"-" validate:"required,min=2,max=50"`
+	DapurID     uint       `json:"-" validate:"required,min=1"`
 }
 
 type AddItemBatchRequest struct {
-	Items []AddItemRequest `validate:"required"`
+	Items   []AddItemRequest `validate:"required"`
+	DapurID uint             `json:"-" validate:"required,min=1"`
 }
 
 type UpdateItemRequest struct {
@@ -189,6 +193,7 @@ type UpdateItemRequest struct {
 	InitialStock *float64   `json:"initial_stock,omitempty" validate:"omitempty,numeric,gte=0"`
 	DateAdded    *time.Time `json:"date_added,omitempty" validate:"omitempty"`
 	ModifiedBy   string     `json:"-" validate:"required,min=2,max=50"`
+	DapurID      uint       `json:"-" validate:"required,min=1"`
 }
 
 type UpdateItemStockRequest struct {
@@ -198,16 +203,19 @@ type UpdateItemStockRequest struct {
 	UnitPrice  float64 `json:"unit_price" validate:"required,numeric,gte=1"`
 	Supplier   string  `json:"supplier" validate:"omitempty,max=100"`
 	ModifiedBy string  `json:"-" validate:"required,min=2,max=50"`
+	DapurID    uint    `json:"-" validate:"required,min=1"`
 }
 
 type DeleteItemRequest struct {
-	ID string `param:"id" validate:"required,printascii"`
+	ID      string `param:"id" validate:"required,printascii"`
+	DapurID uint   `json:"-" validate:"required,min=1"`
 }
 
 type DeleteStockRequest struct {
 	ID         string `param:"id" validate:"required,printascii"`
 	StockID    int    `param:"stock_id" validate:"required,numeric"`
 	ModifiedBy string `json:"-" validate:"required"`
+	DapurID    uint   `json:"-" validate:"required,min=1"`
 }
 
 type EditStockRequest struct {
@@ -217,10 +225,12 @@ type EditStockRequest struct {
 	UnitPrice  float64 `json:"unit_price" validate:"required,numeric,gt=0"`
 	Supplier   string  `json:"supplier" validate:"omitempty,max=100"`
 	ModifiedBy string  `json:"-" validate:"required,min=2,max=50"`
+	DapurID    uint    `json:"-" validate:"required,min=1"`
 }
 
 type FindByIdItemRequest struct {
-	ID string `param:"id" validate:"required,printascii"`
+	ID      string `param:"id" validate:"required,printascii"`
+	DapurID uint   `json:"-" validate:"required,min=1"`
 }
 
 type FindAllItemsRequest struct {
@@ -229,6 +239,7 @@ type FindAllItemsRequest struct {
 	EndDate     string `query:"end_date,omitempty" validate:"omitempty"`
 	Page        int    `query:"page,omitempty" validate:"omitempty,min=1"`
 	Size        int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
+	DapurID     uint   `json:"-"`
 }
 
 type FindAllStocksRequest struct {
@@ -239,6 +250,7 @@ type FindAllStocksRequest struct {
 	EndDate     string `query:"end_date,omitempty" validate:"omitempty"`
 	Page        int    `query:"page,omitempty" validate:"omitempty,min=1"`
 	Size        int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
+	DapurID     uint   `json:"-"`
 }
 
 type GetInvoiceItemsRequest struct {
@@ -246,6 +258,7 @@ type GetInvoiceItemsRequest struct {
 	DateTo    string `query:"date_to,omitempty" validate:"omitempty,max=50"`
 	StockType string `query:"stock_type,omitempty" validate:"omitempty,oneof=IN OUT"`
 	StockIDs  []uint
+	DapurID   uint
 }
 
 type FindAllInvoicesRequest struct {
@@ -254,6 +267,7 @@ type FindAllInvoicesRequest struct {
 	EndDate     string `query:"end_date,omitempty" validate:"omitempty"`
 	Page        int    `query:"page,omitempty" validate:"omitempty,min=1"`
 	Size        int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
+	DapurID     uint   `json:"-"`
 }
 
 type GetItemStockSummaryRequest struct {
@@ -262,4 +276,5 @@ type GetItemStockSummaryRequest struct {
 	Page        int    `query:"page,omitempty" validate:"omitempty,min=1"`
 	Size        int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
 	SearchQuery string `query:"search_query,omitempty" validate:"omitempty,max=30"`
+	DapurID     uint   `json:"-"`
 }

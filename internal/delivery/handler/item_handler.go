@@ -36,12 +36,12 @@ type ItemHandler struct {
 type ItemService interface {
 	Add(ctx context.Context, request *model.AddItemRequest) (*model.ItemResponse, error)
 	AddBatches(ctx context.Context, request *model.AddItemBatchRequest) error
-	ExportItems(ctx context.Context) ([]model.ItemResponse, int, error)
+	ExportItems(ctx context.Context, dapurID uint) ([]model.ItemResponse, int, error)
 	Update(ctx context.Context, request *model.UpdateItemRequest) (*model.ItemResponse, error)
 	Delete(ctx context.Context, request *model.DeleteItemRequest) (bool, error)
 	FindById(ctx context.Context, request *model.FindByIdItemRequest) (*model.ItemResponse, error)
 	FindAll(ctx context.Context, request *model.FindAllItemsRequest) ([]model.ItemResponse, int64, error)
-	GetItemCategories(ctx context.Context) ([]string, error)
+	GetItemCategories(ctx context.Context, dapurID uint) ([]string, error)
 }
 
 type StockService interface {
@@ -49,7 +49,7 @@ type StockService interface {
 	EditStock(ctx context.Context, request *model.EditStockRequest) (*model.StockResponse, error)
 	DeleteStock(ctx context.Context, request *model.DeleteStockRequest) (bool, error)
 	FindAllStocks(ctx context.Context, request *model.FindAllStocksRequest) ([]model.StockResponse, int64, error)
-	GetStocksFinanceSummary(ctx context.Context) (*model.StocksFinanceSummaryResponse, error)
+	GetStocksFinanceSummary(ctx context.Context, dapurID uint) (*model.StocksFinanceSummaryResponse, error)
 	GetItemStocksSummary(ctx context.Context, request *model.GetItemStockSummaryRequest) ([]model.ItemStocksSummaryResponse, int64, error)
 }
 
@@ -57,16 +57,16 @@ type InvoiceService interface {
 	GetInvoiceItems(ctx context.Context, request *model.GetInvoiceItemsRequest) (*model.InvoiceSummary, error)
 	SaveInvoice(ctx context.Context, request *model.GenerateInvoiceRequest, summary *model.InvoiceSummary) error
 	FindAllInvoices(ctx context.Context, request *model.FindAllInvoicesRequest) ([]model.InvoiceResponse, int64, error)
-	FindInvoiceByID(ctx context.Context, id uint) (*model.InvoiceData, error)
-	FindInvoiceDetail(ctx context.Context, id uint) (*model.InvoiceDetailResponse, error)
+	FindInvoiceByID(ctx context.Context, id uint, dapurID uint) (*model.InvoiceData, error)
+	FindInvoiceDetail(ctx context.Context, id uint, dapurID uint) (*model.InvoiceDetailResponse, error)
 	UpdateInvoice(ctx context.Context, request *model.UpdateInvoiceRequest) error
-	DeleteInvoice(ctx context.Context, id uint) error
+	DeleteInvoice(ctx context.Context, id uint, dapurID uint) error
 }
 
 type SettingService interface {
-	GetCompanyProfile(ctx context.Context) (*model.CompanyProfileResponse, error)
-	GetNextDocumentNumbers(ctx context.Context) (*model.DocumentSequenceResponse, error)
-	ConsumeDocumentNumbers(ctx context.Context) error
+	GetCompanyProfile(ctx context.Context, dapurID uint) (*model.CompanyProfileResponse, error)
+	GetNextDocumentNumbers(ctx context.Context, dapurID uint) (*model.DocumentSequenceResponse, error)
+	ConsumeDocumentNumbers(ctx context.Context, dapurID uint) error
 }
 
 var (
@@ -106,6 +106,7 @@ func (h *ItemHandler) Add(c *fiber.Ctx) error {
 	}
 
 	request.ModifiedBy = auth.Fullname
+	request.DapurID = *auth.CurrentDapurID
 
 	response, err := h.itemService.Add(c.Context(), request)
 	if err != nil {
@@ -201,6 +202,7 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 			MeasureUnit: strings.TrimSpace(record[3]),
 			UnitPrice:   price,
 			ModifiedBy:  auth.Fullname,
+			DapurID:     *auth.CurrentDapurID,
 		}
 
 		items = append(items, item)
@@ -215,7 +217,7 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Jumlah baris melebihi batas maksimum %d baris", maxCSVRows))
 	}
 
-	err = h.itemService.AddBatches(c.Context(), &model.AddItemBatchRequest{Items: items})
+	err = h.itemService.AddBatches(c.Context(), &model.AddItemBatchRequest{Items: items, DapurID: *auth.CurrentDapurID})
 	if err != nil {
 		h.log.Warnf("failed to bulk insert items: %v", err)
 		return exception.InternalServerError
@@ -229,7 +231,9 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) ExportItems(c *fiber.Ctx) error {
-	items, _, err := h.itemService.ExportItems(c.Context())
+	auth := middleware.GetAuthUser(c)
+
+	items, _, err := h.itemService.ExportItems(c.Context(), *auth.CurrentDapurID)
 	if err != nil {
 		h.log.Warnf("failed to find all items: %v", err)
 		return err
@@ -257,6 +261,7 @@ func (h *ItemHandler) Update(c *fiber.Ctx) error {
 	}
 
 	request.ModifiedBy = auth.Fullname
+	request.DapurID = *auth.CurrentDapurID
 
 	response, err := h.itemService.Update(c.Context(), request)
 	if err != nil {
@@ -286,6 +291,7 @@ func (h *ItemHandler) UpdateStock(c *fiber.Ctx) error {
 	}
 
 	request.ModifiedBy = auth.Fullname
+	request.DapurID = *auth.CurrentDapurID
 
 	response, err := h.stockService.UpdateStock(c.Context(), request)
 	if err != nil {
@@ -321,6 +327,7 @@ func (h *ItemHandler) EditStock(c *fiber.Ctx) error {
 
 	request.StockID = stockIdInt
 	request.ModifiedBy = auth.Fullname
+	request.DapurID = *auth.CurrentDapurID
 
 	response, err := h.stockService.EditStock(c.Context(), request)
 	if err != nil {
@@ -336,11 +343,15 @@ func (h *ItemHandler) EditStock(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) Delete(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	request := new(model.DeleteItemRequest)
 	if err := c.ParamsParser(request); err != nil {
 		h.log.Warnf("failed to parse request body: %v", err)
 		return err
 	}
+
+	request.DapurID = *auth.CurrentDapurID
 
 	response, err := h.itemService.Delete(c.Context(), request)
 	if err != nil {
@@ -369,6 +380,7 @@ func (h *ItemHandler) DeleteStock(c *fiber.Ctx) error {
 		ID:         id,
 		StockID:    stockIdInt,
 		ModifiedBy: auth.Fullname,
+		DapurID:    *auth.CurrentDapurID,
 	}
 
 	response, err := h.stockService.DeleteStock(c.Context(), request)
@@ -385,11 +397,15 @@ func (h *ItemHandler) DeleteStock(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) FindById(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	request := new(model.FindByIdItemRequest)
 	if err := c.ParamsParser(request); err != nil {
 		h.log.Warnf("failed to parse request body: %v", err)
 		return err
 	}
+
+	request.DapurID = *auth.CurrentDapurID
 
 	response, err := h.itemService.FindById(c.Context(), request)
 	if err != nil {
@@ -405,7 +421,9 @@ func (h *ItemHandler) FindById(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) GetItemCategories(c *fiber.Ctx) error {
-	categories, err := h.itemService.GetItemCategories(c.Context())
+	auth := middleware.GetAuthUser(c)
+
+	categories, err := h.itemService.GetItemCategories(c.Context(), *auth.CurrentDapurID)
 	if err != nil {
 		h.log.Warnf("failed to get item categories: %v", err)
 		return err
@@ -419,12 +437,15 @@ func (h *ItemHandler) GetItemCategories(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) FindAll(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	request := &model.FindAllItemsRequest{
 		SearchQuery: c.Query("search_query", ""),
 		StartDate:   c.Query("start_date", ""),
 		EndDate:     c.Query("end_date", ""),
 		Page:        c.QueryInt("page", 1),
 		Size:        c.QueryInt("size", 10),
+		DapurID:     *auth.CurrentDapurID,
 	}
 
 	response, total, err := h.itemService.FindAll(c.Context(), request)
@@ -449,6 +470,8 @@ func (h *ItemHandler) FindAll(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) FindAllStocks(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	request := &model.FindAllStocksRequest{
 		SearchQuery: c.Query("search_query", ""),
 		StartDate:   c.Query("start_date", ""),
@@ -457,6 +480,7 @@ func (h *ItemHandler) FindAllStocks(c *fiber.Ctx) error {
 		Size:        c.QueryInt("size", 10),
 		Type:        c.Query("type", "ALL"),
 		Category:    c.Query("category", ""),
+		DapurID:     *auth.CurrentDapurID,
 	}
 
 	response, total, err := h.stockService.FindAllStocks(c.Context(), request)
@@ -481,7 +505,9 @@ func (h *ItemHandler) FindAllStocks(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) GetStocksFinanceSummary(c *fiber.Ctx) error {
-	response, err := h.stockService.GetStocksFinanceSummary(c.Context())
+	auth := middleware.GetAuthUser(c)
+
+	response, err := h.stockService.GetStocksFinanceSummary(c.Context(), *auth.CurrentDapurID)
 	if err != nil {
 		h.log.Warnf("failed to get stocks finance summary: %v", err)
 		return err
@@ -495,12 +521,15 @@ func (h *ItemHandler) GetStocksFinanceSummary(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) GetItemStocksSummary(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	request := &model.GetItemStockSummaryRequest{
 		StartDate:   c.Query("start_date", ""),
 		EndDate:     c.Query("end_date", ""),
 		Page:        c.QueryInt("page", 1),
 		Size:        c.QueryInt("size", 10),
 		SearchQuery: c.Query("search_query"),
+		DapurID:     *auth.CurrentDapurID,
 	}
 
 	response, total, err := h.stockService.GetItemStocksSummary(c.Context(), request)
@@ -523,15 +552,21 @@ func (h *ItemHandler) GetItemStocksSummary(c *fiber.Ctx) error {
 		Paging:  pagingMetadata,
 	})
 }
+
 func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+	dapurID := *auth.CurrentDapurID
+
 	request := new(model.GenerateInvoiceRequest)
 	if err := c.BodyParser(request); err != nil {
 		h.log.Warnf("failed to parse invoice request body: %v", err)
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 
+	request.DapurID = dapurID
+
 	if request.CompanyName == "" || request.CompanyAddress == "" || request.CompanyContact == "" {
-		profile, err := h.settingService.GetCompanyProfile(c.Context())
+		profile, err := h.settingService.GetCompanyProfile(c.Context(), dapurID)
 		if err != nil {
 			h.log.Warnf("failed to get company profile: %v", err)
 			return err
@@ -548,7 +583,7 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 	}
 
 	if request.InvoiceNo == "" || request.QuoNo == "" {
-		numbers, err := h.settingService.GetNextDocumentNumbers(c.Context())
+		numbers, err := h.settingService.GetNextDocumentNumbers(c.Context(), dapurID)
 		if err != nil {
 			h.log.Warnf("failed to get next document numbers: %v", err)
 			return err
@@ -577,6 +612,7 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		DateTo:    request.DateTo,
 		StockType: stockType,
 		StockIDs:  request.StockIDs,
+		DapurID:   dapurID,
 	}
 
 	summary, err := h.invoiceService.GetInvoiceItems(c.Context(), invoiceItemsReq)
@@ -590,7 +626,6 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		label = "MASUK"
 	}
 	if len(summary.Items) == 0 {
-
 		return fiber.NewError(fiber.StatusNotFound, fmt.Sprintf("tidak ada data bahan %s pada rentang tanggal yang dipilih", label))
 	}
 
@@ -599,7 +634,7 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		return err
 	}
 
-	if err := h.settingService.ConsumeDocumentNumbers(c.Context()); err != nil {
+	if err := h.settingService.ConsumeDocumentNumbers(c.Context(), dapurID); err != nil {
 		h.log.Warnf("failed to consume document numbers: %v", err)
 		return err
 	}
@@ -651,12 +686,15 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) GetInvoiceHistory(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	request := &model.FindAllInvoicesRequest{
 		SearchQuery: c.Query("search_query", ""),
 		StartDate:   c.Query("start_date", ""),
 		EndDate:     c.Query("end_date", ""),
 		Page:        c.QueryInt("page", 1),
 		Size:        c.QueryInt("size", 10),
+		DapurID:     *auth.CurrentDapurID,
 	}
 
 	response, total, err := h.invoiceService.FindAllInvoices(c.Context(), request)
@@ -694,13 +732,15 @@ func (h *ItemHandler) GetInvoiceHistory(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) DownloadInvoicePDF(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	idStr := c.Params("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil || id == 0 {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid invoice id")
 	}
 
-	pdfData, err := h.invoiceService.FindInvoiceByID(c.Context(), uint(id))
+	pdfData, err := h.invoiceService.FindInvoiceByID(c.Context(), uint(id), *auth.CurrentDapurID)
 	if err != nil {
 		h.log.Warnf("failed to find invoice %d: %v", id, err)
 		return err
@@ -740,13 +780,15 @@ func (h *ItemHandler) DownloadInvoicePDF(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) FindInvoiceDetail(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	idStr := c.Params("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil || id == 0 {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid invoice id")
 	}
 
-	detail, err := h.invoiceService.FindInvoiceDetail(c.Context(), uint(id))
+	detail, err := h.invoiceService.FindInvoiceDetail(c.Context(), uint(id), *auth.CurrentDapurID)
 	if err != nil {
 		h.log.Warnf("failed to get invoice detail %d: %v", id, err)
 		return err
@@ -760,6 +802,8 @@ func (h *ItemHandler) FindInvoiceDetail(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) UpdateInvoice(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	idStr := c.Params("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil || id == 0 {
@@ -772,6 +816,7 @@ func (h *ItemHandler) UpdateInvoice(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 	request.ID = uint(id)
+	request.DapurID = *auth.CurrentDapurID
 
 	if err := h.validate.Struct(request); err != nil {
 		h.log.Warnf("failed to validate update invoice request: %v", err)
@@ -791,13 +836,15 @@ func (h *ItemHandler) UpdateInvoice(c *fiber.Ctx) error {
 }
 
 func (h *ItemHandler) DeleteInvoice(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
 	idStr := c.Params("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil || id == 0 {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid invoice id")
 	}
 
-	if err := h.invoiceService.DeleteInvoice(c.Context(), uint(id)); err != nil {
+	if err := h.invoiceService.DeleteInvoice(c.Context(), uint(id), *auth.CurrentDapurID); err != nil {
 		h.log.Warnf("failed to delete invoice %d: %v", id, err)
 		return err
 	}

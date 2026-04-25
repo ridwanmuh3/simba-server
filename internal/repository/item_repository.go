@@ -20,7 +20,7 @@ func NewItemRepository() *ItemRepository {
 
 func (r *ItemRepository) AddBatches(db *gorm.DB, items []entity.Item) error {
 	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "name"}},
+		Columns:   []clause.Column{{Name: "name"}, {Name: "dapur_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"stock", "unit_price", "modified_by"}),
 	}).Create(&items).Error
 }
@@ -53,9 +53,9 @@ func (r *ItemRepository) FindAllStocks(db *gorm.DB, query *model.FindAllStocksRe
 	return stocks, total, nil
 }
 
-func (r *ItemRepository) CountByName(db *gorm.DB, name string) (int64, error) {
+func (r *ItemRepository) CountByName(db *gorm.DB, name string, dapurID uint) (int64, error) {
 	var count int64
-	err := db.Model(new(entity.Item)).Where("name = ?", name).Count(&count).Error
+	err := db.Model(new(entity.Item)).Where("name = ? AND dapur_id = ?", name, dapurID).Count(&count).Error
 	return count, err
 }
 
@@ -67,6 +67,9 @@ func (r *ItemRepository) CountAll(db *gorm.DB) (int64, error) {
 
 func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
+		if query.DapurID > 0 {
+			tx = tx.Where("dapur_id = ?", query.DapurID)
+		}
 		return tx.Scopes(
 			SearchScope([]string{"id", "name", "category"}, query.SearchQuery),
 			DateRangeScope("created_at", query.StartDate, query.EndDate),
@@ -77,6 +80,9 @@ func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *g
 func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx *gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
 		tx = tx.Joins("LEFT JOIN items AS item ON item.id = stock_tracks.item_id")
+		if query.DapurID > 0 {
+			tx = tx.Where("stock_tracks.dapur_id = ?", query.DapurID)
+		}
 		tx = tx.Scopes(
 			SearchScope(
 				[]string{"stock_tracks.item_id", "item.name", "item.category", "stock_tracks.supplier"},

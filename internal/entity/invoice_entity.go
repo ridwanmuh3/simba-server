@@ -5,6 +5,7 @@ import "time"
 // Invoice represents the data model for the invoice generation form.
 type Invoice struct {
 	ID              uint   `gorm:"primaryKey" json:"id"`
+	DapurID         uint   `gorm:"not null;index;uniqueIndex:uidx_inv_no_type;uniqueIndex:uidx_po_no_type;uniqueIndex:uidx_quo_no_type"`
 	StockType       string `gorm:"type:varchar(10);not null;uniqueIndex:uidx_inv_no_type;uniqueIndex:uidx_po_no_type;uniqueIndex:uidx_quo_no_type"`
 	CompanyName     string `gorm:"type:varchar(255);not null"`
 	CompanyContact  string `gorm:"type:varchar(50);not null"`

@@ -12,14 +12,16 @@ import (
 )
 
 type RouteConfig struct {
-	App              *fiber.App
-	UserHandler      *handler.UserHandler
-	ItemHandler      *handler.ItemHandler
-	FinanceHandler   *handler.FinanceHandler
-	DashboardHandler *handler.DashboardHandler
-	SettingHandler   *handler.SettingHandler
-	AuthMiddleware   fiber.Handler
-	Log              *zap.SugaredLogger
+	App                    *fiber.App
+	UserHandler            *handler.UserHandler
+	ItemHandler            *handler.ItemHandler
+	FinanceHandler         *handler.FinanceHandler
+	DashboardHandler       *handler.DashboardHandler
+	SettingHandler         *handler.SettingHandler
+	DapurHandler           *handler.DapurHandler
+	AuthMiddleware         fiber.Handler
+	DapurRequiredMiddleware fiber.Handler
+	Log                    *zap.SugaredLogger
 }
 
 func (c *RouteConfig) Setup() {
@@ -27,6 +29,7 @@ func (c *RouteConfig) Setup() {
 	c.SetupUploadRoute()
 	c.SetupAuthRoute()
 	c.SetupUserRoute()
+	c.SetupDapurRoute()
 	c.SetupItemRoute()
 	c.SetupFinanceRoute()
 	c.SetupDashboardRoute()
@@ -55,6 +58,17 @@ func (c *RouteConfig) SetupAuthRoute() {
 	authRoute.Post("/refresh", c.UserHandler.Refresh)
 	authRoute.Post("/reset-password", c.UserHandler.ResetPassword)
 	authRoute.Post("/register", c.UserHandler.Register)
+	authRoute.Post("/select-dapur", c.AuthMiddleware, c.DapurHandler.SelectDapur)
+}
+
+func (c *RouteConfig) SetupDapurRoute() {
+	dapurRoute := c.App.Group("/api/dapurs")
+	dapurRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Super Admin"))
+
+	dapurRoute.Get("/", c.DapurHandler.FindAll)
+	dapurRoute.Post("/", c.DapurHandler.Create)
+	dapurRoute.Put("/:id", c.DapurHandler.Update)
+	dapurRoute.Delete("/:id", c.DapurHandler.Delete)
 }
 
 func (c *RouteConfig) SetupUserRoute() {
@@ -74,7 +88,7 @@ func (c *RouteConfig) SetupUserRoute() {
 func (c *RouteConfig) SetupItemRoute() {
 	itemRoute := c.App.Group("/api/items")
 
-	itemRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"))
+	itemRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"), c.DapurRequiredMiddleware)
 
 	itemRoute.Post("/", c.ItemHandler.Add)
 	itemRoute.Post("/import", c.ItemHandler.ImportItems)
@@ -101,7 +115,7 @@ func (c *RouteConfig) SetupItemRoute() {
 func (c *RouteConfig) SetupFinanceRoute() {
 	financeRoute := c.App.Group("/api/finances")
 
-	financeRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"))
+	financeRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"), c.DapurRequiredMiddleware)
 
 	financeRoute.Post("/", c.FinanceHandler.Add)
 	// financeRoute.Post("/import", c.FinanceHandler.ImportItems)
@@ -114,7 +128,7 @@ func (c *RouteConfig) SetupFinanceRoute() {
 
 func (c *RouteConfig) SetupDashboardRoute() {
 	dashboardRoute := c.App.Group("/api/dashboard")
-	dashboardRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"))
+	dashboardRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"), c.DapurRequiredMiddleware)
 	dashboardRoute.Get("/", c.DashboardHandler.GetDashboardStats)
 }
 
@@ -129,7 +143,7 @@ func (c *RouteConfig) SetupUploadRoute() {
 func (c *RouteConfig) SetupSettingRoute() {
 	settingRoute := c.App.Group("/api/settings")
 
-	settingRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"))
+	settingRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"), c.DapurRequiredMiddleware)
 
 	settingRoute.Get("/company", c.SettingHandler.GetCompanyProfile)
 	settingRoute.Put("/company", c.SettingHandler.UpdateCompanyProfile)

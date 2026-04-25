@@ -13,6 +13,7 @@ type Finance struct {
 	ExtraNote   string `gorm:"type:text"`
 	ProofImage  string `gorm:"size:100;not null"`
 	ModifiedBy  string `gorm:"size:100;not null"`
+	DapurID     uint   `gorm:"not null;index"`
 }
 
 func (f *Finance) TableName() string {

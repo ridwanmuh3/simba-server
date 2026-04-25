@@ -7,11 +7,12 @@ type TokenResponse struct {
 }
 
 type Auth struct {
-	ID           int    `json:"id"`
-	Fullname     string `json:"fullname"`
-	Role         string `json:"role"`
-	Token        string `json:"-"`
-	RefreshToken string `json:"-"`
+	ID             int    `json:"id"`
+	Fullname       string `json:"fullname"`
+	Role           string `json:"role"`
+	Token          string `json:"-"`
+	RefreshToken   string `json:"-"`
+	CurrentDapurID *uint  `json:"current_dapur_id,omitempty"`
 }
 
 type RefreshSessionRequest struct {
