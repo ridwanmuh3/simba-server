@@ -62,13 +62,13 @@ func (c *RouteConfig) SetupAuthRoute() {
 }
 
 func (c *RouteConfig) SetupDapurRoute() {
-	dapurRoute := c.App.Group("/api/dapurs")
-	dapurRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Super Admin"))
+	superAdminOnly := middleware.NewRbacMiddleware(c.Log, "Super Admin")
 
+	dapurRoute := c.App.Group("/api/dapurs", c.AuthMiddleware)
 	dapurRoute.Get("/", c.DapurHandler.FindAll)
-	dapurRoute.Post("/", c.DapurHandler.Create)
-	dapurRoute.Put("/:id", c.DapurHandler.Update)
-	dapurRoute.Delete("/:id", c.DapurHandler.Delete)
+	dapurRoute.Post("/", superAdminOnly, c.DapurHandler.Create)
+	dapurRoute.Put("/:id", superAdminOnly, c.DapurHandler.Update)
+	dapurRoute.Delete("/:id", superAdminOnly, c.DapurHandler.Delete)
 }
 
 func (c *RouteConfig) SetupUserRoute() {
