@@ -23,6 +23,20 @@ func main() {
 
 	log.Info("running schema migration...")
 
+	// 5. AutoMigrate all entities — adds missing columns, indexes, constraints.
+	if err := db.AutoMigrate(
+		&entity.User{},
+		&entity.Item{},
+		&entity.StockTracking{},
+		&entity.Finance{},
+		&entity.ActivityLog{},
+		&entity.AppSetting{},
+		&entity.Invoice{},
+		&entity.InvoiceItem{},
+	); err != nil {
+		log.Fatalf("migration failed: %v", err)
+	}
+
 	// 1. Create dapurs table first so we can seed a default dapur.
 	if err := db.AutoMigrate(&entity.Dapur{}); err != nil {
 		log.Fatalf("migration failed (dapur): %v", err)
@@ -71,20 +85,6 @@ func main() {
 				log.Warnf("could not drop index %s: %v", idx, err)
 			}
 		}
-	}
-
-	// 5. AutoMigrate all entities — adds missing columns, indexes, constraints.
-	if err := db.AutoMigrate(
-		&entity.User{},
-		&entity.Item{},
-		&entity.StockTracking{},
-		&entity.Finance{},
-		&entity.ActivityLog{},
-		&entity.AppSetting{},
-		&entity.Invoice{},
-		&entity.InvoiceItem{},
-	); err != nil {
-		log.Fatalf("migration failed: %v", err)
 	}
 
 	log.Info("migration complete")

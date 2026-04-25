@@ -682,6 +682,7 @@ func (h *ItemHandler) GetInvoiceItems(c *fiber.Ctx) error {
 
 	c.Set("Content-Type", "application/pdf")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Set("Access-Control-Expose-Headers", "Content-Disposition")
 	return c.Send(pdfBuffer.Bytes())
 }
 
@@ -776,6 +777,7 @@ func (h *ItemHandler) DownloadInvoicePDF(c *fiber.Ctx) error {
 
 	c.Set("Content-Type", "application/pdf")
 	c.Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, filename))
+	c.Set("Access-Control-Expose-Headers", "Content-Disposition")
 	return c.Send(pdfBuffer.Bytes())
 }
 
