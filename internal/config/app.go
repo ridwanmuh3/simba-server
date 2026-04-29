@@ -47,7 +47,9 @@ func Bootstrap(config *BootstrapConfig) {
 
 	// handler
 	userHandler := handler.NewUserHandler(config.Config, config.Log, userService)
-	itemHandler := handler.NewItemHandler(config.Config, config.Log, config.Validate, itemService, stockService, invoiceService, settingService)
+	itemHandler := handler.NewItemHandler(config.Config, config.Log, itemService)
+	stockHandler := handler.NewStockHandler(config.Log, stockService)
+	invoiceHandler := handler.NewInvoiceHandler(config.Log, config.Validate, invoiceService, settingService)
 	financeHandler := handler.NewFinanceHandler(config.Config, config.Log, financeService)
 	dashboardHandler := handler.NewDashboardHandler(config.Config, config.Log, dashboardService)
 	settingHandler := handler.NewSettingHandler(config.Config, config.Log, config.Validate, settingService)
@@ -60,6 +62,8 @@ func Bootstrap(config *BootstrapConfig) {
 		App:                     config.App,
 		UserHandler:             userHandler,
 		ItemHandler:             itemHandler,
+		StockHandler:            stockHandler,
+		InvoiceHandler:          invoiceHandler,
 		FinanceHandler:          financeHandler,
 		DashboardHandler:        dashboardHandler,
 		SettingHandler:          settingHandler,

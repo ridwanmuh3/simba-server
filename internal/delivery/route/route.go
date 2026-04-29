@@ -12,16 +12,18 @@ import (
 )
 
 type RouteConfig struct {
-	App                    *fiber.App
-	UserHandler            *handler.UserHandler
-	ItemHandler            *handler.ItemHandler
-	FinanceHandler         *handler.FinanceHandler
-	DashboardHandler       *handler.DashboardHandler
-	SettingHandler         *handler.SettingHandler
-	DapurHandler           *handler.DapurHandler
-	AuthMiddleware         fiber.Handler
+	App                     *fiber.App
+	UserHandler             *handler.UserHandler
+	ItemHandler             *handler.ItemHandler
+	StockHandler            *handler.StockHandler
+	InvoiceHandler          *handler.InvoiceHandler
+	FinanceHandler          *handler.FinanceHandler
+	DashboardHandler        *handler.DashboardHandler
+	SettingHandler          *handler.SettingHandler
+	DapurHandler            *handler.DapurHandler
+	AuthMiddleware          fiber.Handler
 	DapurRequiredMiddleware fiber.Handler
-	Log                    *zap.SugaredLogger
+	Log                     *zap.SugaredLogger
 }
 
 func (c *RouteConfig) Setup() {
@@ -92,24 +94,26 @@ func (c *RouteConfig) SetupItemRoute() {
 
 	itemRoute.Post("/", c.ItemHandler.Add)
 	itemRoute.Post("/import", c.ItemHandler.ImportItems)
-	itemRoute.Post("/:id/stocks", c.ItemHandler.UpdateStock)
-	itemRoute.Patch("/:id/stocks/:stock_id", c.ItemHandler.EditStock)
 	itemRoute.Put("/:id", c.ItemHandler.Update)
-	itemRoute.Delete("/:id/stocks/:stock_id", c.ItemHandler.DeleteStock)
 	itemRoute.Delete("/:id", c.ItemHandler.Delete)
-	itemRoute.Post("/invoices", c.ItemHandler.GetInvoiceItems)
-	itemRoute.Get("/invoices", c.ItemHandler.GetInvoiceHistory)
-	itemRoute.Get("/invoices/:id", c.ItemHandler.FindInvoiceDetail)
-	itemRoute.Patch("/invoices/:id", c.ItemHandler.UpdateInvoice)
-	itemRoute.Delete("/invoices/:id", c.ItemHandler.DeleteInvoice)
-	itemRoute.Get("/invoices/:id/pdf", c.ItemHandler.DownloadInvoicePDF)
 	itemRoute.Get("/export", c.ItemHandler.ExportItems)
 	itemRoute.Get("/categories", c.ItemHandler.GetItemCategories)
-	itemRoute.Get("/stocks", c.ItemHandler.FindAllStocks)
-	itemRoute.Get("/stocks/summary", c.ItemHandler.GetStocksFinanceSummary)
-	itemRoute.Get("/stocks/opname", c.ItemHandler.GetItemStocksSummary)
 	itemRoute.Get("/:id", c.ItemHandler.FindById)
 	itemRoute.Get("/", c.ItemHandler.FindAll)
+
+	itemRoute.Post("/:id/stocks", c.StockHandler.UpdateStock)
+	itemRoute.Patch("/:id/stocks/:stock_id", c.StockHandler.EditStock)
+	itemRoute.Delete("/:id/stocks/:stock_id", c.StockHandler.DeleteStock)
+	itemRoute.Get("/stocks", c.StockHandler.FindAllStocks)
+	itemRoute.Get("/stocks/summary", c.StockHandler.GetStocksFinanceSummary)
+	itemRoute.Get("/stocks/opname", c.StockHandler.GetItemStocksSummary)
+
+	itemRoute.Post("/invoices", c.InvoiceHandler.GetInvoiceItems)
+	itemRoute.Get("/invoices", c.InvoiceHandler.GetInvoiceHistory)
+	itemRoute.Get("/invoices/:id", c.InvoiceHandler.FindInvoiceDetail)
+	itemRoute.Patch("/invoices/:id", c.InvoiceHandler.UpdateInvoice)
+	itemRoute.Delete("/invoices/:id", c.InvoiceHandler.DeleteInvoice)
+	itemRoute.Get("/invoices/:id/pdf", c.InvoiceHandler.DownloadInvoicePDF)
 }
 
 func (c *RouteConfig) SetupFinanceRoute() {
