@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,6 +19,40 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/repository"
 	"github.com/ridwanmuh3/simba-server/internal/util"
 )
+
+// itemIDLockKey is the PostgreSQL advisory lock key that serializes item-ID
+// generation. pg_advisory_xact_lock holds it for the caller's transaction
+// lifetime — auto-released on commit or rollback — so concurrent inserts
+// across multiple app instances can never read the same max ID.
+const itemIDLockKey = 7283910
+
+// nextItemNumber acquires an exclusive advisory lock scoped to tx, then reads
+// the current max numeric suffix from item IDs and returns the next value.
+// Callers must be inside an open transaction.
+func nextItemNumber(tx *gorm.DB) (int, error) {
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", itemIDLockKey).Error; err != nil {
+		return 0, err
+	}
+
+	var lastItem entity.Item
+	err := tx.Unscoped().Order("id DESC").First(&lastItem).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 1, nil
+		}
+		return 0, err
+	}
+
+	parts := strings.Split(lastItem.ID, "-")
+	if len(parts) == 3 {
+		n, parseErr := strconv.Atoi(parts[2])
+		if parseErr == nil {
+			return n + 1, nil
+		}
+	}
+
+	return 0, fmt.Errorf("malformed last item ID: %s", lastItem.ID)
+}
 
 type ItemService struct {
 	db             *gorm.DB
@@ -54,20 +89,12 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 		return nil, err
 	}
 
-	// ID sequence is global — IDs must be unique across all dapurs.
-	var lastItem entity.Item
-	err := tx.WithContext(ctx).Unscoped().Order("id DESC").First(&lastItem).Error
-
-	currentNumber := 0
-	if err == nil {
-		parts := strings.Split(lastItem.ID, "-")
-		if len(parts) == 3 {
-			currentNumber, _ = strconv.Atoi(parts[2])
-		}
+	nextNum, err := nextItemNumber(tx)
+	if err != nil {
+		s.log.Errorf("failed to generate item ID: %v", err)
+		return nil, exception.InternalServerError
 	}
-
-	currentNumber++
-	newID := fmt.Sprintf("MBG-BHN-%04d", currentNumber)
+	newID := fmt.Sprintf("MBG-BHN-%04d", nextNum)
 
 	stock := util.Round4(request.Stock)
 	item := &entity.Item{
@@ -124,22 +151,17 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 		return err
 	}
 
-	var lastItem entity.Item
-	err := tx.WithContext(ctx).Unscoped().Order("id DESC").First(&lastItem).Error
-
-	currentNumber := 0
-	if err == nil {
-		parts := strings.Split(lastItem.ID, "-")
-		if len(parts) == 3 {
-			currentNumber, _ = strconv.Atoi(parts[2])
-		}
+	nextNum, err := nextItemNumber(tx)
+	if err != nil {
+		s.log.Errorf("failed to generate item ID: %v", err)
+		return exception.InternalServerError
 	}
 
 	var items []entity.Item
 
 	for _, reqItem := range request.Items {
-		currentNumber++
-		newID := fmt.Sprintf("MBG-BHN-%04d", currentNumber)
+		newID := fmt.Sprintf("MBG-BHN-%04d", nextNum)
+		nextNum++
 
 		item := entity.Item{
 			ID:           newID,
