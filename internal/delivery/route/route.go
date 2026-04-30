@@ -108,6 +108,7 @@ func (c *RouteConfig) SetupItemRoute() {
 	itemRoute.Get("/stocks", c.StockHandler.FindAllStocks)
 
 	itemRoute.Post("/invoices", c.InvoiceHandler.GetInvoiceItems)
+	itemRoute.Get("/invoices/items-flat", c.InvoiceHandler.GetInvoiceItemsFlat)
 	itemRoute.Get("/invoices/:id/pdf", c.InvoiceHandler.DownloadInvoicePDF)
 	itemRoute.Get("/invoices/:id", c.InvoiceHandler.FindInvoiceDetail)
 	itemRoute.Patch("/invoices/:id", c.InvoiceHandler.UpdateInvoice)

@@ -479,6 +479,121 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 	return nil
 }
 
+func (s *InvoiceService) GetInvoiceItemsFlat(ctx context.Context, req *model.GetInvoiceItemsFlatRequest) ([]model.InvoiceItemFlatResponse, int64, error) {
+	db := s.db.WithContext(ctx)
+
+	page := req.Page
+	if page < 1 {
+		page = 1
+	}
+	size := req.Size
+	if size < 1 {
+		size = 10
+	}
+
+	base := db.Table("invoice_items").
+		Joins("JOIN invoices ON invoice_items.invoice_id = invoices.id").
+		Where("invoices.dapur_id = ?", req.DapurID)
+
+	if req.StockType != "" {
+		base = base.Where("invoice_items.stock_type = ?", req.StockType)
+	}
+
+	if req.SearchQuery != "" {
+		base = base.Where("invoice_items.item_name LIKE ?", "%"+req.SearchQuery+"%")
+	}
+	if req.StartDate != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, req.StartDate); err == nil {
+			base = base.Where("invoices.created_at >= ?", parsed.UTC())
+		}
+	}
+	if req.EndDate != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, req.EndDate); err == nil {
+			base = base.Where("invoices.created_at <= ?", parsed.UTC())
+		}
+	}
+
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		s.log.Errorf("failed to count invoice items flat: %v", err)
+		return nil, 0, exception.InternalServerError
+	}
+
+	type flatRow struct {
+		Date           string  `gorm:"column:date"`
+		InvoiceNumber  string  `gorm:"column:invoice_number"`
+		ItemName       string  `gorm:"column:item_name"`
+		MeasureUnit    string  `gorm:"column:measure_unit"`
+		Amount         float64 `gorm:"column:amount"`
+		StockType      string  `gorm:"column:stock_type"`
+		BuyPrice       float64 `gorm:"column:buy_price"`
+		SellPrice      float64 `gorm:"column:sell_price"`
+		TotalBuyPrice  float64 `gorm:"column:total_buy_price"`
+		TotalSellPrice float64 `gorm:"column:total_sell_price"`
+	}
+
+	var rows []flatRow
+	err := base.
+		Select(`
+			invoices.invoice_date AS date,
+			invoices.invoice_number,
+			invoice_items.item_name,
+			invoice_items.measure_unit,
+			invoice_items.amount,
+			invoice_items.stock_type,
+			CASE WHEN invoice_items.stock_type = 'IN'
+				THEN invoice_items.unit_price
+				ELSE COALESCE((
+					SELECT AVG(st.unit_price) FROM stock_tracks st
+					WHERE st.item_id = invoice_items.item_id AND st.type = 'IN'
+					AND st.deleted_at IS NULL AND st.dapur_id = invoices.dapur_id
+				), COALESCE(items.unit_price, 0))
+			END AS buy_price,
+			CASE WHEN invoice_items.stock_type = 'OUT'
+				THEN invoice_items.unit_price
+				ELSE COALESCE(items.unit_price, 0)
+			END AS sell_price,
+			CASE WHEN invoice_items.stock_type = 'IN'
+				THEN invoice_items.total_price
+				ELSE invoice_items.amount * COALESCE((
+					SELECT AVG(st.unit_price) FROM stock_tracks st
+					WHERE st.item_id = invoice_items.item_id AND st.type = 'IN'
+					AND st.deleted_at IS NULL AND st.dapur_id = invoices.dapur_id
+				), COALESCE(items.unit_price, 0))
+			END AS total_buy_price,
+			CASE WHEN invoice_items.stock_type = 'OUT'
+				THEN invoice_items.total_price
+				ELSE invoice_items.amount * COALESCE(items.unit_price, 0)
+			END AS total_sell_price
+		`).
+		Joins("LEFT JOIN items ON invoice_items.item_id = items.id AND items.deleted_at IS NULL").
+		Order("invoices.created_at DESC, invoice_items.id ASC").
+		Offset((page - 1) * size).
+		Limit(size).
+		Scan(&rows).Error
+	if err != nil {
+		s.log.Errorf("failed to fetch invoice items flat: %v", err)
+		return nil, 0, exception.InternalServerError
+	}
+
+	responses := make([]model.InvoiceItemFlatResponse, len(rows))
+	for i, r := range rows {
+		responses[i] = model.InvoiceItemFlatResponse{
+			Date:           r.Date,
+			InvoiceNumber:  r.InvoiceNumber,
+			ItemName:       r.ItemName,
+			MeasureUnit:    r.MeasureUnit,
+			Amount:         r.Amount,
+			StockType:      r.StockType,
+			BuyPrice:       r.BuyPrice,
+			SellPrice:      r.SellPrice,
+			TotalBuyPrice:  r.TotalBuyPrice,
+			TotalSellPrice: r.TotalSellPrice,
+		}
+	}
+	return responses, total, nil
+}
+
 func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint, dapurID uint) error {
 	db := s.db.WithContext(ctx)
 

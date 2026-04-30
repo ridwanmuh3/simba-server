@@ -33,6 +33,7 @@ type InvoiceService interface {
 	FindInvoiceDetail(ctx context.Context, id uint, dapurID uint) (*model.InvoiceDetailResponse, error)
 	UpdateInvoice(ctx context.Context, request *model.UpdateInvoiceRequest) error
 	DeleteInvoice(ctx context.Context, id uint, dapurID uint) error
+	GetInvoiceItemsFlat(ctx context.Context, req *model.GetInvoiceItemsFlatRequest) ([]model.InvoiceItemFlatResponse, int64, error)
 }
 
 type SettingService interface {
@@ -340,6 +341,51 @@ func (h *InvoiceHandler) UpdateInvoice(c *fiber.Ctx) error {
 		Status:  fiber.StatusOK,
 		Message: "update invoice success",
 		Data:    true,
+	})
+}
+
+func (h *InvoiceHandler) GetInvoiceItemsFlat(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+
+	req := &model.GetInvoiceItemsFlatRequest{
+		SearchQuery: c.Query("search_query", ""),
+		StartDate:   c.Query("start_date", ""),
+		EndDate:     c.Query("end_date", ""),
+		StockType:   c.Query("stock_type", ""),
+		Page:        c.QueryInt("page", 1),
+		Size:        c.QueryInt("size", 10),
+		DapurID:     *auth.CurrentDapurID,
+	}
+
+	items, total, err := h.invoiceService.GetInvoiceItemsFlat(c.Context(), req)
+	if err != nil {
+		h.log.Warnf("failed to get invoice items flat: %v", err)
+		return err
+	}
+
+	pageSize := req.Size
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	page := req.Page
+	if page < 1 {
+		page = 1
+	}
+	totalPage := int64(0)
+	if total > 0 {
+		totalPage = int64(math.Ceil(float64(total) / float64(pageSize)))
+	}
+
+	return c.JSON(model.Response[[]model.InvoiceItemFlatResponse]{
+		Status:  fiber.StatusOK,
+		Message: "get invoice items flat success",
+		Data:    items,
+		Paging: &model.PageMetadata{
+			Page:      page,
+			Size:      pageSize,
+			TotalItem: total,
+			TotalPage: totalPage,
+		},
 	})
 }
 

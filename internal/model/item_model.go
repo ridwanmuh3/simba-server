@@ -279,3 +279,26 @@ type GetItemStockSummaryRequest struct {
 	SearchQuery string `query:"search_query,omitempty" validate:"omitempty,max=30"`
 	DapurID     uint   `json:"-"`
 }
+
+type InvoiceItemFlatResponse struct {
+	Date           string  `json:"date"`
+	InvoiceNumber  string  `json:"invoice_number"`
+	ItemName       string  `json:"item_name"`
+	MeasureUnit    string  `json:"measure_unit"`
+	Amount         float64 `json:"amount"`
+	StockType      string  `json:"stock_type"`
+	BuyPrice       float64 `json:"buy_price"`
+	SellPrice      float64 `json:"sell_price"`
+	TotalBuyPrice  float64 `json:"total_buy_price"`
+	TotalSellPrice float64 `json:"total_sell_price"`
+}
+
+type GetInvoiceItemsFlatRequest struct {
+	SearchQuery string `query:"search_query,omitempty" validate:"omitempty,max=100"`
+	StartDate   string `query:"start_date,omitempty" validate:"omitempty"`
+	EndDate     string `query:"end_date,omitempty" validate:"omitempty"`
+	StockType   string `query:"stock_type,omitempty" validate:"omitempty,oneof=IN OUT"`
+	Page        int    `query:"page,omitempty" validate:"omitempty,min=1"`
+	Size        int    `query:"size,omitempty" validate:"omitempty,min=1,max=9999"`
+	DapurID     uint   `json:"-"`
+}
