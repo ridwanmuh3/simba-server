@@ -141,6 +141,18 @@ func (h *UserHandler) Logout(c *fiber.Ctx) error {
 	})
 }
 
+func (h *UserHandler) Heartbeat(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+	if err := h.userService.Heartbeat(c.Context(), auth.ID); err != nil {
+		h.log.Warnf("failed to update heartbeat: %v", err)
+		return err
+	}
+	return c.JSON(model.Response[any]{
+		Status:  fiber.StatusOK,
+		Message: "heartbeat success",
+	})
+}
+
 func (h *UserHandler) Current(c *fiber.Ctx) error {
 	auth := middleware.GetAuthUser(c)
 	request := &model.FindByIdUserRequest{

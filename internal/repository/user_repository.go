@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -56,14 +58,15 @@ func (r *UserRepository) FindAll(db *gorm.DB, query *model.FindAllUserRequest) (
 
 func (r *UserRepository) GetUsersStats(db *gorm.DB) (*entity.UserStats, error) {
 	var stats entity.UserStats
+	threshold := time.Now().Add(-5 * time.Minute)
 
 	err := db.Model(new(entity.User)).
 		Select(`
             COUNT(*) as total,
             COUNT(CASE WHEN role = 'Super Admin' THEN 1 END) as super_admin,
             COUNT(CASE WHEN role = 'Admin' THEN 1 END) as admin,
-            COUNT(CASE WHEN is_active = true THEN 1 END) as active
-        `).
+            COUNT(CASE WHEN last_active > ? THEN 1 END) as active
+        `, threshold).
 		Scan(&stats).Error
 	if err != nil {
 		return nil, err

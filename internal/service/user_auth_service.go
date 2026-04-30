@@ -165,6 +165,11 @@ func (s *UserService) Logout(ctx context.Context, request *model.LogoutUserReque
 	return true, nil
 }
 
+func (s *UserService) Heartbeat(ctx context.Context, userID int) error {
+	db := s.db.WithContext(ctx)
+	return db.Model(&entity.User{}).Where("id = ?", userID).Update("last_active", time.Now()).Error
+}
+
 func (s *UserService) Verify(ctx context.Context, request *model.VerifyUserRequest) (*model.Auth, error) {
 	db := s.db.WithContext(ctx)
 
