@@ -52,20 +52,32 @@ func main() {
 	// ──────────────────────────────────────────────
 	now := time.Now()
 	baseDate := now.AddDate(0, -1, 0) // 1 month ago
+	categories := []string{
+		"Bahan Pokok", "Bahan Tambahan", "Minuman", "Kemasan",
+	}
 
-	items := []entity.Item{
-		{ID: "MBG-BHN-0001", Name: "Tepung Terigu", Category: "Bahan Pokok", InitialStock: 100, Stock: 100, MeasureUnit: "Kg", UnitPrice: 12000, TotalPrice: 1200000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0002", Name: "Gula Pasir", Category: "Bahan Pokok", InitialStock: 80, Stock: 80, MeasureUnit: "Kg", UnitPrice: 15000, TotalPrice: 1200000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0003", Name: "Mentega", Category: "Bahan Pokok", InitialStock: 50, Stock: 50, MeasureUnit: "Kg", UnitPrice: 25000, TotalPrice: 1250000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0004", Name: "Telur Ayam", Category: "Bahan Pokok", InitialStock: 200, Stock: 200, MeasureUnit: "Butir", UnitPrice: 2500, TotalPrice: 500000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0005", Name: "Susu Cair", Category: "Minuman", InitialStock: 60, Stock: 60, MeasureUnit: "Liter", UnitPrice: 18000, TotalPrice: 1080000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0006", Name: "Cokelat Bubuk", Category: "Bahan Tambahan", InitialStock: 30, Stock: 30, MeasureUnit: "Kg", UnitPrice: 45000, TotalPrice: 1350000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0007", Name: "Minyak Goreng", Category: "Bahan Pokok", InitialStock: 40, Stock: 40, MeasureUnit: "Liter", UnitPrice: 17000, TotalPrice: 680000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0008", Name: "Keju Cheddar", Category: "Bahan Tambahan", InitialStock: 25, Stock: 25, MeasureUnit: "Kg", UnitPrice: 85000, TotalPrice: 2125000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0009", Name: "Vanili Bubuk", Category: "Bahan Tambahan", InitialStock: 10, Stock: 10, MeasureUnit: "Kg", UnitPrice: 120000, TotalPrice: 1200000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0010", Name: "Garam", Category: "Bahan Pokok", InitialStock: 50, Stock: 50, MeasureUnit: "Kg", UnitPrice: 5000, TotalPrice: 250000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0011", Name: "Baking Powder", Category: "Bahan Tambahan", InitialStock: 20, Stock: 20, MeasureUnit: "Kg", UnitPrice: 35000, TotalPrice: 700000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
-		{ID: "MBG-BHN-0012", Name: "Krim Kocok", Category: "Bahan Tambahan", InitialStock: 15, Stock: 15, MeasureUnit: "Liter", UnitPrice: 55000, TotalPrice: 825000, ModifiedBy: "Budi Almaliki", CreatedAt: baseDate},
+	units := []string{"Kg", "Liter", "Butir", "Pcs"}
+
+	var items []entity.Item
+
+	for i := 1; i <= 120; i++ {
+		price := float64(5000 + (i * 1000))
+
+		item := entity.Item{
+			ID:           fmt.Sprintf("MBG-BHN-%04d", i),
+			Name:         fmt.Sprintf("Bahan-%d", i),
+			Category:     categories[i%len(categories)],
+			InitialStock: float64(50 + i%100),
+			Stock:        float64(50 + i%100),
+			MeasureUnit:  units[i%len(units)],
+			UnitPrice:    price,
+			TotalPrice:   price * float64(50+i%100),
+			ModifiedBy:   "System Seeder",
+			CreatedAt:    baseDate.AddDate(0, 0, -i),
+			DapurID:      1,
+		}
+
+		items = append(items, item)
 	}
 
 	for i := range items {
@@ -87,34 +99,22 @@ func main() {
 		Supplier  string
 		DaysAgo   int
 	}
+	var stockSeeds []stockSeed
 
-	stockSeeds := []stockSeed{
-		// IN records
-		{ItemID: "MBG-BHN-0001", Type: "IN", Amount: 50, UnitPrice: 12000, Supplier: "PT Bogasari", DaysAgo: 25},
-		{ItemID: "MBG-BHN-0002", Type: "IN", Amount: 30, UnitPrice: 15000, Supplier: "CV Makmur", DaysAgo: 22},
-		{ItemID: "MBG-BHN-0003", Type: "IN", Amount: 20, UnitPrice: 25000, Supplier: "PT Blue Band", DaysAgo: 20},
-		{ItemID: "MBG-BHN-0004", Type: "IN", Amount: 100, UnitPrice: 2500, Supplier: "Peternakan Jaya", DaysAgo: 18},
-		{ItemID: "MBG-BHN-0005", Type: "IN", Amount: 25, UnitPrice: 18000, Supplier: "PT Ultrajaya", DaysAgo: 15},
-		{ItemID: "MBG-BHN-0006", Type: "IN", Amount: 10, UnitPrice: 45000, Supplier: "PT Van Houten", DaysAgo: 14},
-		{ItemID: "MBG-BHN-0007", Type: "IN", Amount: 20, UnitPrice: 17000, Supplier: "PT Bimoli", DaysAgo: 12},
-		{ItemID: "MBG-BHN-0008", Type: "IN", Amount: 10, UnitPrice: 85000, Supplier: "PT Kraft", DaysAgo: 10},
-		{ItemID: "MBG-BHN-0009", Type: "IN", Amount: 5, UnitPrice: 120000, Supplier: "CV Rempah Nusantara", DaysAgo: 8},
-		{ItemID: "MBG-BHN-0010", Type: "IN", Amount: 30, UnitPrice: 5000, Supplier: "PT Garam Indonesia", DaysAgo: 7},
-		{ItemID: "MBG-BHN-0011", Type: "IN", Amount: 10, UnitPrice: 35000, Supplier: "CV Kimia Pangan", DaysAgo: 5},
-		{ItemID: "MBG-BHN-0012", Type: "IN", Amount: 8, UnitPrice: 55000, Supplier: "PT Anchor", DaysAgo: 3},
-		// OUT records
-		{ItemID: "MBG-BHN-0001", Type: "OUT", Amount: 30, UnitPrice: 14000, Supplier: "-", DaysAgo: 20},
-		{ItemID: "MBG-BHN-0002", Type: "OUT", Amount: 15, UnitPrice: 17000, Supplier: "-", DaysAgo: 17},
-		{ItemID: "MBG-BHN-0003", Type: "OUT", Amount: 10, UnitPrice: 30000, Supplier: "-", DaysAgo: 15},
-		{ItemID: "MBG-BHN-0004", Type: "OUT", Amount: 60, UnitPrice: 3000, Supplier: "-", DaysAgo: 13},
-		{ItemID: "MBG-BHN-0005", Type: "OUT", Amount: 20, UnitPrice: 22000, Supplier: "-", DaysAgo: 10},
-		{ItemID: "MBG-BHN-0006", Type: "OUT", Amount: 8, UnitPrice: 55000, Supplier: "-", DaysAgo: 9},
-		{ItemID: "MBG-BHN-0007", Type: "OUT", Amount: 15, UnitPrice: 20000, Supplier: "-", DaysAgo: 7},
-		{ItemID: "MBG-BHN-0008", Type: "OUT", Amount: 5, UnitPrice: 100000, Supplier: "-", DaysAgo: 5},
-		{ItemID: "MBG-BHN-0001", Type: "IN", Amount: 25, UnitPrice: 12500, Supplier: "PT Bogasari", DaysAgo: 4},
-		{ItemID: "MBG-BHN-0001", Type: "OUT", Amount: 20, UnitPrice: 14500, Supplier: "-", DaysAgo: 2},
+	for i := 0; i < 300; i++ {
+		item := items[i%len(items)]
+
+		isIn := i%2 == 0
+
+		stockSeeds = append(stockSeeds, stockSeed{
+			ItemID:    item.ID,
+			Type:      map[bool]string{true: "IN", false: "OUT"}[isIn],
+			Amount:    float64(5 + i%20),
+			UnitPrice: item.UnitPrice + float64(i%5000),
+			Supplier:  fmt.Sprintf("Supplier-%d", i%10),
+			DaysAgo:   i % 30,
+		})
 	}
-
 	// Build a map of current item state for running calculations
 	itemMap := make(map[string]*entity.Item)
 	for i := range items {
@@ -138,6 +138,7 @@ func main() {
 			Supplier:      ss.Supplier,
 			ModifiedBy:    "Budi Almaliki",
 			ItemID:        ss.ItemID,
+			DapurID:       1,
 		}
 
 		switch ss.Type {
@@ -170,10 +171,6 @@ func main() {
 			Where("item_id = ? AND type = ? AND amount = ? AND supplier = ? AND created_at = ?",
 				ss.ItemID, ss.Type, ss.Amount, ss.Supplier, createdAt).
 			Count(&existingCount)
-		if existingCount > 0 {
-			log.Warnf("stock track for %s already exists, skipping", ss.ItemID)
-			continue
-		}
 
 		if err := db.Create(&st).Error; err != nil {
 			log.Warnf("stock track for %s failed: %v", ss.ItemID, err)
@@ -197,20 +194,33 @@ func main() {
 	// Normalize old seed values ("in"/"out") to match app convention.
 	db.Model(&entity.Finance{}).Where("type = ?", "in").Update("type", "PEMASUKAN")
 	db.Model(&entity.Finance{}).Where("type = ?", "out").Update("type", "PENGELUARAN")
+	categoriesFinance := []string{
+		"Penjualan", "Pembelian Bahan", "Operasional", "Gaji",
+	}
 
-	finances := []entity.Finance{
-		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan kue tart pesanan Ibu Sari", Amount: 850000, ExtraNote: "Dibayar tunai", ProofImage: "/uploads/finances-proof/seed-proof-1.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan roti tawar harian", Amount: 320000, ExtraNote: "Transfer BCA", ProofImage: "/uploads/finances-proof/seed-proof-2.png", ModifiedBy: "Andi Wijaya"},
-		{Type: "PENGELUARAN", Category: "Pembelian Bahan", Description: "Pembelian tepung terigu 50kg", Amount: 600000, ExtraNote: "Bayar ke PT Bogasari", ProofImage: "/uploads/finances-proof/seed-proof-3.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "PENGELUARAN", Category: "Operasional", Description: "Bayar listrik bulan Maret", Amount: 450000, ExtraNote: "Token listrik", ProofImage: "/uploads/finances-proof/seed-proof-4.png", ModifiedBy: "Farah Nabila"},
-		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan brownies box 20pcs", Amount: 1200000, ExtraNote: "Pesanan katering", ProofImage: "/uploads/finances-proof/seed-proof-5.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "PENGELUARAN", Category: "Pembelian Bahan", Description: "Pembelian gula pasir 30kg", Amount: 450000, ExtraNote: "Bayar tunai ke CV Makmur", ProofImage: "/uploads/finances-proof/seed-proof-6.png", ModifiedBy: "Andi Wijaya"},
-		{Type: "PENGELUARAN", Category: "Gaji", Description: "Gaji karyawan bulan Maret", Amount: 3500000, ExtraNote: "Transfer payroll", ProofImage: "/uploads/finances-proof/seed-proof-7.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan donat isi 50pcs", Amount: 500000, ExtraNote: "Cash on delivery", ProofImage: "/uploads/finances-proof/seed-proof-8.png", ModifiedBy: "Aulia Rahman"},
-		{Type: "PENGELUARAN", Category: "Operasional", Description: "Bayar sewa tempat bulan Maret", Amount: 2000000, ExtraNote: "Transfer ke pemilik ruko", ProofImage: "/uploads/finances-proof/seed-proof-9.png", ModifiedBy: "Budi Almaliki"},
-		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan cake ulang tahun", Amount: 750000, ExtraNote: "DP 50%, sisanya COD", ProofImage: "/uploads/finances-proof/seed-proof-10.png", ModifiedBy: "Farah Nabila"},
-		{Type: "PENGELUARAN", Category: "Pembelian Bahan", Description: "Pembelian keju cheddar 10kg", Amount: 850000, ExtraNote: "PT Kraft, invoice NET30", ProofImage: "/uploads/finances-proof/seed-proof-11.png", ModifiedBy: "Andi Wijaya"},
-		{Type: "PEMASUKAN", Category: "Penjualan", Description: "Penjualan roti manis assorted", Amount: 680000, ExtraNote: "Dibayar via QRIS", ProofImage: "/uploads/finances-proof/seed-proof-12.png", ModifiedBy: "Budi Almaliki"},
+	var finances []entity.Finance
+
+	for i := 1; i <= 120; i++ {
+
+		isIncome := i%2 == 0
+
+		amount := 100000 + (i * 50000)
+
+		f := entity.Finance{
+			Type:        map[bool]string{true: "PEMASUKAN", false: "PENGELUARAN"}[isIncome],
+			Category:    categoriesFinance[i%len(categoriesFinance)],
+			Description: fmt.Sprintf("Transaksi ke-%d", i),
+			Amount:      amount,
+			ExtraNote:   fmt.Sprintf("Auto generated #%d", i),
+			ProofImage:  "/uploads/finances-proof/seed-proof-1.png",
+			ModifiedBy:  "System Seeder",
+			DapurID:     1,
+		}
+
+		// spread dates (important for charts)
+		f.Model.CreatedAt = now.AddDate(0, 0, -(i % 60))
+
+		finances = append(finances, f)
 	}
 
 	for i, f := range finances {
@@ -219,10 +229,6 @@ func main() {
 		db.Model(&entity.Finance{}).
 			Where("description = ? AND amount = ? AND type = ?", f.Description, f.Amount, f.Type).
 			Count(&existingCount)
-		if existingCount > 0 {
-			log.Warnf("finance record %d may already exist, skipping", i+1)
-			continue
-		}
 		if err := db.Create(&f).Error; err != nil {
 			log.Warnf("finance record %d failed: %v", i+1, err)
 		}

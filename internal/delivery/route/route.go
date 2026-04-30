@@ -99,22 +99,23 @@ func (c *RouteConfig) SetupItemRoute() {
 	itemRoute.Delete("/:id", c.ItemHandler.Delete)
 	itemRoute.Get("/export", c.ItemHandler.ExportItems)
 	itemRoute.Get("/categories", c.ItemHandler.GetItemCategories)
-	itemRoute.Get("/:id", c.ItemHandler.FindById)
-	itemRoute.Get("/", c.ItemHandler.FindAll)
 
 	itemRoute.Post("/:id/stocks", c.StockHandler.UpdateStock)
 	itemRoute.Patch("/:id/stocks/:stock_id", c.StockHandler.EditStock)
 	itemRoute.Delete("/:id/stocks/:stock_id", c.StockHandler.DeleteStock)
-	itemRoute.Get("/stocks", c.StockHandler.FindAllStocks)
 	itemRoute.Get("/stocks/summary", c.StockHandler.GetStocksFinanceSummary)
 	itemRoute.Get("/stocks/opname", c.StockHandler.GetItemStocksSummary)
+	itemRoute.Get("/stocks", c.StockHandler.FindAllStocks)
 
 	itemRoute.Post("/invoices", c.InvoiceHandler.GetInvoiceItems)
-	itemRoute.Get("/invoices", c.InvoiceHandler.GetInvoiceHistory)
+	itemRoute.Get("/invoices/:id/pdf", c.InvoiceHandler.DownloadInvoicePDF)
 	itemRoute.Get("/invoices/:id", c.InvoiceHandler.FindInvoiceDetail)
 	itemRoute.Patch("/invoices/:id", c.InvoiceHandler.UpdateInvoice)
 	itemRoute.Delete("/invoices/:id", c.InvoiceHandler.DeleteInvoice)
-	itemRoute.Get("/invoices/:id/pdf", c.InvoiceHandler.DownloadInvoicePDF)
+	itemRoute.Get("/invoices", c.InvoiceHandler.GetInvoiceHistory)
+
+	itemRoute.Get("/:id", c.ItemHandler.FindById)
+	itemRoute.Get("/", c.ItemHandler.FindAll)
 }
 
 func (c *RouteConfig) SetupFinanceRoute() {

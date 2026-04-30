@@ -207,8 +207,9 @@ type UpdateItemStockRequest struct {
 }
 
 type DeleteItemRequest struct {
-	ID      string `param:"id" validate:"required,printascii"`
-	DapurID uint   `json:"-" validate:"required,min=1"`
+	ID         string `param:"id" validate:"required,printascii"`
+	ModifiedBy string `json:"-" validate:"required"`
+	DapurID    uint   `json:"-" validate:"required,min=1"`
 }
 
 type DeleteStockRequest struct {

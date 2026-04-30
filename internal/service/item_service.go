@@ -330,7 +330,7 @@ func (s *ItemService) Delete(ctx context.Context, request *model.DeleteItemReque
 		Type:        "DELETE-ITEM",
 		Title:       "Data bahan dihapus permanen",
 		Description: item.Name,
-		ActionBy:    request.ID,
+		ActionBy:    request.ModifiedBy,
 		DapurID:     request.DapurID,
 	}).Error; err != nil {
 		return false, exception.InternalServerError

@@ -236,6 +236,7 @@ func (h *ItemHandler) Delete(c *fiber.Ctx) error {
 		return err
 	}
 
+	request.ModifiedBy = auth.Fullname
 	request.DapurID = *auth.CurrentDapurID
 
 	response, err := h.itemService.Delete(c.Context(), request)

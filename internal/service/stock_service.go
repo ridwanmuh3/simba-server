@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -268,6 +269,7 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 			totalPrice = util.Round2(totalPrice + added)
 
 			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
+			tracks[i].NewStock = runningStock
 
 		case "OUT":
 			amount := tracks[i].Amount
@@ -419,6 +421,7 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 			totalPrice = util.Round2(totalPrice + added)
 
 			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
+			tracks[i].NewStock = runningStock
 
 		case "OUT":
 			amount := tracks[i].Amount
@@ -585,6 +588,27 @@ func (s *StockService) GetItemStocksSummary(ctx context.Context, request *model.
 		return []model.ItemStocksSummaryResponse{}, 0, nil
 	}
 
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	joinClause := "LEFT JOIN stock_tracks st ON st.item_id = items.id AND st.deleted_at IS NULL AND st.dapur_id = ?"
+	joinArgs := []interface{}{request.DapurID}
+
+	if request.StartDate != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, request.StartDate); err == nil {
+			p := parsed.In(loc)
+			start := time.Date(p.Year(), p.Month(), p.Day(), 0, 0, 0, 0, loc)
+			joinClause += " AND st.created_at >= ?"
+			joinArgs = append(joinArgs, start.UTC())
+		}
+	}
+	if request.EndDate != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, request.EndDate); err == nil {
+			p := parsed.In(loc)
+			end := time.Date(p.Year(), p.Month(), p.Day(), 23, 59, 59, 999999999, loc)
+			joinClause += " AND st.created_at <= ?"
+			joinArgs = append(joinArgs, end.UTC())
+		}
+	}
+
 	err = baseQuery.
 		Select(`
             items.id AS item_id,
@@ -605,7 +629,7 @@ func (s *StockService) GetItemStocksSummary(ctx context.Context, request *model.
             COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.amount ELSE 0 END), 0) AS total_in,
             COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.amount ELSE 0 END), 0) AS total_out
         `).
-		Joins("LEFT JOIN stock_tracks st ON st.item_id = items.id AND st.deleted_at IS NULL AND st.dapur_id = ?", request.DapurID).
+		Joins(joinClause, joinArgs...).
 		Group(`
             items.id,
             items.name,
