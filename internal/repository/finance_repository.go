@@ -1,10 +1,11 @@
 package repository
 
 import (
-	"github.com/ridwanmuh3/simba-server/internal/entity"
-	"github.com/ridwanmuh3/simba-server/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/ridwanmuh3/simba-server/internal/entity"
+	"github.com/ridwanmuh3/simba-server/internal/model"
 )
 
 type FinanceRepository struct {
@@ -40,7 +41,7 @@ func (r *FinanceRepository) FindAll(db *gorm.DB, query *model.FindAllFinanceRequ
 	if err := db.Scopes(scope).
 		Offset((query.Page - 1) * query.Size).
 		Limit(query.Size).
-		Order("created_at DESC").
+		Order(OrderBy()).
 		Find(&finances).Error; err != nil {
 		return nil, 0, err
 	}

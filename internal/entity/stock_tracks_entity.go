@@ -5,9 +5,9 @@ import "gorm.io/gorm"
 type StockTracking struct {
 	gorm.Model
 	Type          string  `gorm:"size:10;not null"`
-	Amount        float64     `gorm:"not null"`
-	PreviousStock float64     `gorm:"not null"`
-	NewStock      float64     `gorm:"not null"`
+	Amount        float64 `gorm:"not null"`
+	PreviousStock float64 `gorm:"not null"`
+	NewStock      float64 `gorm:"not null"`
 	UnitPrice     float64 `gorm:"not null"`
 	TotalPrice    float64 `gorm:"not null"`
 	Supplier      string  `gorm:"size:100;not null"`

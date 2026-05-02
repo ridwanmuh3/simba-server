@@ -30,6 +30,7 @@ type StockService struct {
 type StockRepository interface {
 	Save(db *gorm.DB, entity *entity.Item) error
 	FindAllStocks(db *gorm.DB, query *model.FindAllStocksRequest) ([]entity.StockTracking, int64, error)
+	FindLastStockPrice(db *gorm.DB, itemID string, stockType string, dapurID uint) (float64, error)
 }
 
 var _ StockRepository = (*repository.ItemRepository)(nil)
@@ -72,7 +73,7 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 	err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("item_id = ? AND dapur_id = ? AND deleted_at IS NULL", item.ID, request.DapurID).
-		Order("created_at DESC, id DESC").
+		Order("created_at DESC, id DESC, updated_at DESC").
 		First(&last).Error
 
 	var previousStock float64
@@ -651,4 +652,8 @@ func (s *StockService) GetItemStocksSummary(ctx context.Context, request *model.
 	}
 
 	return responses, total, nil
+}
+
+func (s *StockService) GetLastStockPrice(ctx context.Context, itemID string, stockType string, dapurID uint) (float64, error) {
+	return s.itemRepository.FindLastStockPrice(s.db.WithContext(ctx), itemID, stockType, dapurID)
 }

@@ -7,19 +7,20 @@ import (
 )
 
 type Item struct {
-	ID           string  `gorm:"size:30;primaryKey;index;not null"`
-	Name         string  `gorm:"size:90;not null"`
-	Category     string  `gorm:"size:30;not null"`
-	InitialStock float64 `gorm:"not null"`
-	Stock        float64 `gorm:"not null"`
-	MeasureUnit  string  `gorm:"size:30;not null"`
-	UnitPrice    float64 `gorm:"not null"`
-	TotalPrice   float64 `gorm:"not null"`
-	ModifiedBy   string  `gorm:"size:50;not null"`
-	DapurID      uint    `gorm:"not null;index"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
+	ID               string  `gorm:"size:30;primaryKey;index;not null"`
+	Name             string  `gorm:"size:90;not null"`
+	Category         string  `gorm:"size:30;not null"`
+	InitialStock     float64 `gorm:"not null"`
+	Stock            float64 `gorm:"not null"`
+	MeasureUnit      string  `gorm:"size:30;not null"`
+	InitialUnitPrice float64 `gorm:"not null"`
+	UnitPrice        float64 `gorm:"not null"`
+	TotalPrice       float64 `gorm:"not null"`
+	ModifiedBy       string  `gorm:"size:50;not null"`
+	DapurID          uint    `gorm:"not null;index"`
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	DeletedAt        gorm.DeletedAt `gorm:"index"`
 }
 
 func (i *Item) TableName() string {

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"slices"
 
 	"gorm.io/gorm"
@@ -27,7 +28,8 @@ func (r *ItemRepository) AddBatches(db *gorm.DB, items []entity.Item) error {
 
 func (r *ItemRepository) FindAll(db *gorm.DB, query *model.FindAllItemsRequest) ([]entity.Item, int64, error) {
 	var items []entity.Item
-	if err := db.Scopes(r.FilterItem(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order("created_at DESC").Find(&items).Error; err != nil {
+
+	if err := db.Scopes(r.FilterItem(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order(OrderBy()).Find(&items).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -41,7 +43,7 @@ func (r *ItemRepository) FindAll(db *gorm.DB, query *model.FindAllItemsRequest) 
 
 func (r *ItemRepository) FindAllStocks(db *gorm.DB, query *model.FindAllStocksRequest) ([]entity.StockTracking, int64, error) {
 	var stocks []entity.StockTracking
-	if err := db.Preload("Item").Scopes(r.FilterStock(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order("created_at DESC").Find(&stocks).Error; err != nil {
+	if err := db.Preload("Item").Scopes(r.FilterStock(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order(OrderBy()).Find(&stocks).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -51,6 +53,18 @@ func (r *ItemRepository) FindAllStocks(db *gorm.DB, query *model.FindAllStocksRe
 	}
 
 	return stocks, total, nil
+}
+
+func (r *ItemRepository) FindLastStockPrice(db *gorm.DB, itemID string, stockType string, dapurID uint) (float64, error) {
+	var stock entity.StockTracking
+	err := db.Select("unit_price").
+		Where("item_id = ? AND type = ? AND dapur_id = ?", itemID, stockType, dapurID).
+		Order("created_at DESC").
+		Take(&stock).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	return stock.UnitPrice, err
 }
 
 func (r *ItemRepository) CountByName(db *gorm.DB, name string, dapurID uint) (int64, error) {

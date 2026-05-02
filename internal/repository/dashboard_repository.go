@@ -1,9 +1,10 @@
 package repository
 
 import (
+	"gorm.io/gorm"
+
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/model"
-	"gorm.io/gorm"
 )
 
 type DashboardRepository struct{}

@@ -106,6 +106,7 @@ func (c *RouteConfig) SetupItemRoute() {
 	itemRoute.Get("/stocks/summary", c.StockHandler.GetStocksFinanceSummary)
 	itemRoute.Get("/stocks/opname", c.StockHandler.GetItemStocksSummary)
 	itemRoute.Get("/stocks", c.StockHandler.FindAllStocks)
+	itemRoute.Get("/:id/stocks/last-price", c.StockHandler.GetLastStockPrice)
 
 	itemRoute.Post("/invoices", c.InvoiceHandler.GetInvoiceItems)
 	itemRoute.Get("/invoices/items-flat", c.InvoiceHandler.GetInvoiceItemsFlat)

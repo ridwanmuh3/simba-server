@@ -58,14 +58,14 @@ type InvoiceSummary struct {
 }
 
 type InvoiceResponse struct {
-	ID             uint      `json:"id"`
-	StockType      string    `json:"stock_type"`
-	CompanyName    string    `json:"company_name"`
-	CompanyContact string    `json:"company_contact"`
-	CompanyAddress string    `json:"company_address"`
-	InvoiceNumber  string    `json:"invoice_number"`
-	PONumber       string    `json:"po_number"`
-	QuoNumber      string    `json:"quo_number"`
+	ID              uint      `json:"id"`
+	StockType       string    `json:"stock_type"`
+	CompanyName     string    `json:"company_name"`
+	CompanyContact  string    `json:"company_contact"`
+	CompanyAddress  string    `json:"company_address"`
+	InvoiceNumber   string    `json:"invoice_number"`
+	PONumber        string    `json:"po_number"`
+	QuoNumber       string    `json:"quo_number"`
 	ReceiverName    string    `json:"receiver_name"`
 	ReceiverAddress string    `json:"receiver_address"`
 	InvoiceDate     string    `json:"invoice_date"`
@@ -73,9 +73,9 @@ type InvoiceResponse struct {
 	Penanggungjawab string    `json:"penanggungjawab"`
 	Jabatan         string    `json:"jabatan"`
 	BankAccount     string    `json:"bank_account"`
-	HasItems       bool      `json:"has_items"`
-	CreatedAt      time.Time `json:"created_at,omitzero"`
-	UpdatedAt      time.Time `json:"updated_at,omitzero"`
+	HasItems        bool      `json:"has_items"`
+	CreatedAt       time.Time `json:"created_at,omitzero"`
+	UpdatedAt       time.Time `json:"updated_at,omitzero"`
 }
 
 type InvoiceItemResponse struct {
@@ -97,8 +97,8 @@ type InvoiceDetailResponse struct {
 }
 
 type UpdateInvoiceRequest struct {
-	ID              uint  `param:"id"`
-	DapurID         uint  `json:"-" validate:"required,min=1"`
+	ID              uint   `param:"id"`
+	DapurID         uint   `json:"-" validate:"required,min=1"`
 	CompanyName     string `json:"company_name" validate:"required,min=2,max=100"`
 	CompanyAddress  string `json:"company_address" validate:"required,min=2,max=200"`
 	CompanyContact  string `json:"company_contact" validate:"required,min=2,max=100"`

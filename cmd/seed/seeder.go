@@ -133,6 +133,7 @@ func main() {
 			Type:          ss.Type,
 			Amount:        ss.Amount,
 			PreviousStock: item.Stock,
+			PrevUnitPrice: ss.UnitPrice,
 			UnitPrice:     ss.UnitPrice,
 			TotalPrice:    util.Round2(ss.Amount * ss.UnitPrice),
 			Supplier:      ss.Supplier,

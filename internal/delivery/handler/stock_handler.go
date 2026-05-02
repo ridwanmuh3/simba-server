@@ -25,6 +25,7 @@ type StockService interface {
 	FindAllStocks(ctx context.Context, request *model.FindAllStocksRequest) ([]model.StockResponse, int64, error)
 	GetStocksFinanceSummary(ctx context.Context, dapurID uint) (*model.StocksFinanceSummaryResponse, error)
 	GetItemStocksSummary(ctx context.Context, request *model.GetItemStockSummaryRequest) ([]model.ItemStocksSummaryResponse, int64, error)
+	GetLastStockPrice(ctx context.Context, itemID string, stockType string, dapurID uint) (float64, error)
 }
 
 var _ StockService = (*service.StockService)(nil)
@@ -180,6 +181,24 @@ func (h *StockHandler) GetStocksFinanceSummary(c *fiber.Ctx) error {
 		Status:  fiber.StatusOK,
 		Message: "get stocks finance summary success",
 		Data:    response,
+	})
+}
+
+func (h *StockHandler) GetLastStockPrice(c *fiber.Ctx) error {
+	auth := middleware.GetAuthUser(c)
+	itemID := c.Params("id")
+	stockType := c.Query("type", "IN")
+
+	price, err := h.stockService.GetLastStockPrice(c.Context(), itemID, stockType, *auth.CurrentDapurID)
+	if err != nil {
+		h.log.Warnf("failed to get last stock price: %v", err)
+		return err
+	}
+
+	return c.JSON(model.Response[float64]{
+		Status:  fiber.StatusOK,
+		Message: "get last stock price success",
+		Data:    price,
 	})
 }
 

@@ -1,6 +1,9 @@
 package repository
 
-import "gorm.io/gorm"
+import (
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
 
 type Repository[T any] struct{}
 
@@ -24,4 +27,11 @@ func (r *Repository[T]) CountById(db *gorm.DB, id any) (int64, error) {
 	var count int64
 	err := db.Model(new(T)).Where("id = ?", id).Count(&count).Error
 	return count, err
+}
+
+func OrderBy() clause.OrderBy {
+	return clause.OrderBy{Columns: []clause.OrderByColumn{
+		{Column: clause.Column{Name: "created_at"}, Desc: false},
+		{Column: clause.Column{Name: "updated_at"}, Desc: false},
+	}}
 }
