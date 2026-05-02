@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod \
     go build -ldflags="-s -w" -o /out/migrate ./cmd/migrate/main.go
 
 
-FROM alpine:3.20
+FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates tzdata wget
 
