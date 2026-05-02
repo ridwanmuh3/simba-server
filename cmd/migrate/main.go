@@ -23,20 +23,6 @@ func main() {
 
 	log.Info("running schema migration...")
 
-	// 5. AutoMigrate all entities — adds missing columns, indexes, constraints.
-	if err := db.AutoMigrate(
-		&entity.User{},
-		&entity.Item{},
-		&entity.StockTracking{},
-		&entity.Finance{},
-		&entity.ActivityLog{},
-		&entity.AppSetting{},
-		&entity.Invoice{},
-		&entity.InvoiceItem{},
-	); err != nil {
-		log.Fatalf("migration failed: %v", err)
-	}
-
 	// 1. Create dapurs table first so we can seed a default dapur.
 	if err := db.AutoMigrate(&entity.Dapur{}); err != nil {
 		log.Fatalf("migration failed (dapur): %v", err)
@@ -72,7 +58,30 @@ func main() {
 		}
 	}
 
-	// 4. Drop old single-column unique indexes on invoices — replaced by
+	// 4. Drop initial_unit_price column from items if it exists — field removed.
+	if db.Migrator().HasColumn("items", "initial_unit_price") {
+		log.Info("dropping items.initial_unit_price")
+		if err := db.Exec("ALTER TABLE items DROP COLUMN initial_unit_price").Error; err != nil {
+			log.Fatalf("failed to drop initial_unit_price: %v", err)
+		}
+	}
+
+	// 5. AutoMigrate all entities — adds missing columns, indexes, constraints.
+	//    Runs after backfills so all pre-existing rows already have valid data.
+	if err := db.AutoMigrate(
+		&entity.User{},
+		&entity.Item{},
+		&entity.StockTracking{},
+		&entity.Finance{},
+		&entity.ActivityLog{},
+		&entity.AppSetting{},
+		&entity.Invoice{},
+		&entity.InvoiceItem{},
+	); err != nil {
+		log.Fatalf("migration failed: %v", err)
+	}
+
+	// 6. Drop old single-column unique indexes on invoices — replaced by
 	//    composite (stock_type, *) indexes to allow same number across stock types.
 	oldIndexes := []string{
 		"idx_invoices_invoice_number",

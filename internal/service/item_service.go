@@ -103,7 +103,6 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 		Category:         request.Category,
 		InitialStock:     stock,
 		Stock:            stock,
-		InitialUnitPrice: request.UnitPrice,
 		UnitPrice:        request.UnitPrice,
 		MeasureUnit:      request.MeasureUnit,
 		TotalPrice:       util.GetTotalPrice(stock, request.UnitPrice),
@@ -171,7 +170,6 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 			Stock:            reqItem.Stock,
 			InitialStock:     reqItem.Stock,
 			MeasureUnit:      reqItem.MeasureUnit,
-			InitialUnitPrice: reqItem.UnitPrice,
 			UnitPrice:        reqItem.UnitPrice,
 			TotalPrice:       util.GetTotalPrice(reqItem.Stock, reqItem.UnitPrice),
 			ModifiedBy:       reqItem.ModifiedBy,
@@ -285,10 +283,9 @@ func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemReque
 	item.Stock = util.Round4(runningStock)
 	item.TotalPrice = util.Round2(totalPrice)
 	item.UnitPrice = request.UnitPrice
-	item.InitialUnitPrice = request.UnitPrice
 
 	if err := tx.Model(item).
-		Select("Name", "Category", "MeasureUnit", "Stock", "InitialStock", "InitialUnitPrice", "UnitPrice", "TotalPrice", "ModifiedBy", "CreatedAt").
+		Select("Name", "Category", "MeasureUnit", "Stock", "InitialStock", "UnitPrice", "TotalPrice", "ModifiedBy", "CreatedAt").
 		Updates(item).Error; err != nil {
 		s.log.Errorf("failed to update item: %v", err)
 		return nil, exception.InternalServerError
