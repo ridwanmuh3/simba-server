@@ -86,7 +86,6 @@ func main() {
 	oldIndexes := []string{
 		"idx_invoices_invoice_number",
 		"idx_invoice_po_number",
-		"idx_invoice_quo_number",
 	}
 	for _, idx := range oldIndexes {
 		if db.Migrator().HasIndex(&entity.Invoice{}, idx) {
