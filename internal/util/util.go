@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -21,6 +22,9 @@ import (
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 const MAX_INVOICE_ITEM = 30
+
+//go:embed /assets/sppg.png
+var sppg []byte
 
 // HashToken returns hex-encoded SHA-256 of the plaintext token. Used so
 // DB-side storage is not a bearer token equivalent: a DB leak alone cannot
@@ -178,7 +182,6 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 
 	logoPath := filepath.Join(
 		wd,
-		"internal",
 		"assets",
 		"sppg.png",
 	)
