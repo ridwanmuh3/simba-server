@@ -19,6 +19,6 @@ type CompanyProfileResponse struct {
 }
 
 type DocumentSequenceResponse struct {
-	NextInvoiceNo   string `json:"next_invoice_no"`
-	NextQuotationNo string `json:"next_quotation_no"`
+	NextInvoiceNo string `json:"next_invoice_no"`
+	NextPONumber  string `json:"next_po_no"`
 }

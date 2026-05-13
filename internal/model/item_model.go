@@ -65,7 +65,7 @@ type InvoiceResponse struct {
 	CompanyAddress  string    `json:"company_address"`
 	InvoiceNumber   string    `json:"invoice_number"`
 	PONumber        string    `json:"po_number"`
-	QuoNumber       string    `json:"quo_number"`
+	Kebutuhan       string    `json:"kebutuhan"`
 	ReceiverName    string    `json:"receiver_name"`
 	ReceiverAddress string    `json:"receiver_address"`
 	InvoiceDate     string    `json:"invoice_date"`
@@ -124,7 +124,7 @@ type InvoiceData struct {
 	InvoiceNo string
 	Date      string
 	PONo      string
-	QuoNo     string
+	Kebutuhan string
 
 	// Data Penerima (Tengah)
 	ReceiverName    string
@@ -149,7 +149,7 @@ type GenerateInvoiceRequest struct {
 	Date      string `json:"date"`
 
 	PONo  string `json:"po_no" validate:"omitempty,max=50"`
-	QuoNo string `json:"quo_no" validate:"omitempty,max=50"`
+	Kebutuhan string `json:"kebutuhan" validate:"omitempty,max=50"`
 
 	ReceiverName    string `json:"receiver_name" validate:"required,min=2,max=100"`
 	ReceiverAddress string `json:"receiver_address" validate:"required,min=2,max=200"`

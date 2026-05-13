@@ -90,7 +90,7 @@ func (h *InvoiceHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		}
 	}
 
-	if request.InvoiceNo == "" || request.QuoNo == "" {
+	if request.InvoiceNo == "" || request.PONo == "" {
 		numbers, err := h.settingService.GetNextDocumentNumbers(c.Context(), dapurID)
 		if err != nil {
 			h.log.Warnf("failed to get next document numbers: %v", err)
@@ -99,8 +99,8 @@ func (h *InvoiceHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		if request.InvoiceNo == "" {
 			request.InvoiceNo = numbers.NextInvoiceNo
 		}
-		if request.QuoNo == "" {
-			request.QuoNo = numbers.NextQuotationNo
+		if request.PONo == "" {
+			request.PONo = numbers.NextPONumber
 		}
 	}
 
@@ -161,7 +161,7 @@ func (h *InvoiceHandler) GetInvoiceItems(c *fiber.Ctx) error {
 		InvoiceNo:       request.InvoiceNo,
 		Date:            invoiceDate,
 		PONo:            request.PONo,
-		QuoNo:           request.QuoNo,
+		Kebutuhan:       request.Kebutuhan,
 		ReceiverName:    request.ReceiverName,
 		ReceiverAddress: request.ReceiverAddress,
 		Items:           summary.Items,

@@ -240,7 +240,7 @@ func main() {
 	// ──────────────────────────────────────────────
 	db.Exec("UPDATE invoices SET invoice_number = regexp_replace(invoice_number, '^INV-[0-9]{4}-', 'INV-') WHERE invoice_number ~ '^INV-[0-9]{4}-'")
 	db.Exec("UPDATE invoices SET po_number = regexp_replace(po_number, '^PO-[0-9]{4}-', 'PO-') WHERE po_number ~ '^PO-[0-9]{4}-'")
-	db.Exec("UPDATE invoices SET quo_number = regexp_replace(quo_number, '^QUO-[0-9]{4}-', 'QUO-') WHERE quo_number ~ '^QUO-[0-9]{4}-'")
+	db.Exec("UPDATE invoices SET kebutuhan = regexp_replace(kebutuhan, '^QUO-[0-9]{4}-', 'QUO-') WHERE kebutuhan ~ '^QUO-[0-9]{4}-'")
 
 	invoices := []entity.Invoice{
 		{
@@ -250,7 +250,7 @@ func main() {
 			CompanyAddress: "Jl. Melati No. 12, Bandung",
 			InvoiceNumber:  "INV-0001",
 			PONumber:       "PO-0101",
-			QuoNumber:      "QUO-0091",
+			Kebutuhan:      "QUO-0091",
 		},
 		{
 			StockType:      "OUT",
@@ -259,7 +259,7 @@ func main() {
 			CompanyAddress: "Jl. Sudirman No. 88, Jakarta",
 			InvoiceNumber:  "INV-0002",
 			PONumber:       "PO-0102",
-			QuoNumber:      "QUO-0092",
+			Kebutuhan:      "QUO-0092",
 		},
 		{
 			StockType:      "OUT",
@@ -268,7 +268,7 @@ func main() {
 			CompanyAddress: "Jl. Diponegoro No. 45, Surabaya",
 			InvoiceNumber:  "INV-0003",
 			PONumber:       "PO-0103",
-			QuoNumber:      "QUO-0093",
+			Kebutuhan:      "QUO-0093",
 		},
 		{
 			StockType:      "IN",
@@ -277,7 +277,7 @@ func main() {
 			CompanyAddress: "Jl. Gatot Subroto No. 7, Semarang",
 			InvoiceNumber:  "INV-0004",
 			PONumber:       "PO-0104",
-			QuoNumber:      "QUO-0094",
+			Kebutuhan:      "QUO-0094",
 		},
 		{
 			StockType:      "OUT",
@@ -286,7 +286,7 @@ func main() {
 			CompanyAddress: "Jl. Ahmad Yani No. 23, Yogyakarta",
 			InvoiceNumber:  "INV-0005",
 			PONumber:       "PO-0105",
-			QuoNumber:      "QUO-0095",
+			Kebutuhan:      "QUO-0095",
 		},
 		{
 			StockType:      "OUT",
@@ -295,7 +295,7 @@ func main() {
 			CompanyAddress: "Jl. Asia Afrika No. 99, Bandung",
 			InvoiceNumber:  "INV-0006",
 			PONumber:       "PO-0106",
-			QuoNumber:      "QUO-0096",
+			Kebutuhan:      "QUO-0096",
 		},
 	}
 

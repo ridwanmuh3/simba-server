@@ -5,14 +5,14 @@ import "time"
 // Invoice represents the data model for the invoice generation form.
 type Invoice struct {
 	ID              uint   `gorm:"primaryKey" json:"id"`
-	DapurID         uint   `gorm:"not null;index;uniqueIndex:uidx_inv_no_type;uniqueIndex:uidx_po_no_type;uniqueIndex:uidx_quo_no_type"`
-	StockType       string `gorm:"type:varchar(10);not null;uniqueIndex:uidx_inv_no_type;uniqueIndex:uidx_po_no_type;uniqueIndex:uidx_quo_no_type"`
+	DapurID         uint   `gorm:"not null;index;uniqueIndex:uidx_inv_no_type;uniqueIndex:uidx_po_no_type"`
+	StockType       string `gorm:"type:varchar(10);not null;uniqueIndex:uidx_inv_no_type;uniqueIndex:uidx_po_no_type"`
 	CompanyName     string `gorm:"type:varchar(255);not null"`
 	CompanyContact  string `gorm:"type:varchar(50);not null"`
 	CompanyAddress  string `gorm:"type:text;not null"`
 	InvoiceNumber   string `gorm:"type:varchar(100);not null;uniqueIndex:uidx_inv_no_type"`
 	PONumber        string `gorm:"type:varchar(100);uniqueIndex:uidx_po_no_type,where:po_number <> ''"`
-	QuoNumber       string `gorm:"type:varchar(100);uniqueIndex:uidx_quo_no_type,where:quo_number <> ''"`
+	Kebutuhan       string `gorm:"type:varchar(100)"`
 	ReceiverName    string `gorm:"type:varchar(255)"`
 	ReceiverAddress string `gorm:"type:text"`
 	InvoiceDate     string `gorm:"type:varchar(100)"`

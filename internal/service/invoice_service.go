@@ -28,8 +28,6 @@ func isDuplicateKeyError(err error) (bool, string) {
 		return true, "nomor invoice sudah digunakan"
 	case strings.Contains(msg, "po_number"):
 		return true, "nomor PO sudah digunakan"
-	case strings.Contains(msg, "quo_number"):
-		return true, "nomor quotation sudah digunakan"
 	default:
 		return true, "nomor dokumen sudah digunakan"
 	}
@@ -49,7 +47,7 @@ type invoiceHistoryRow struct {
 	CompanyAddress  string
 	InvoiceNumber   string
 	PONumber        string
-	QuoNumber       string
+	Kebutuhan       string
 	ReceiverName    string
 	ReceiverAddress string
 	InvoiceDate     string
@@ -142,7 +140,7 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 		CompanyAddress:  request.CompanyAddress,
 		InvoiceNumber:   request.InvoiceNo,
 		PONumber:        request.PONo,
-		QuoNumber:       request.QuoNo,
+		Kebutuhan:       request.Kebutuhan,
 		ReceiverName:    request.ReceiverName,
 		ReceiverAddress: request.ReceiverAddress,
 		InvoiceDate:     request.Date,
@@ -226,7 +224,7 @@ func (s *InvoiceService) FindInvoiceByID(ctx context.Context, id uint, dapurID u
 		InvoiceNo:       invoice.InvoiceNumber,
 		Date:            invoice.InvoiceDate,
 		PONo:            invoice.PONumber,
-		QuoNo:           invoice.QuoNumber,
+		Kebutuhan:       invoice.Kebutuhan,
 		ReceiverName:    invoice.ReceiverName,
 		ReceiverAddress: invoice.ReceiverAddress,
 		Items:           items,
@@ -274,7 +272,7 @@ func (s *InvoiceService) FindInvoiceDetail(ctx context.Context, id uint, dapurID
 			CompanyAddress:  invoice.CompanyAddress,
 			InvoiceNumber:   invoice.InvoiceNumber,
 			PONumber:        invoice.PONumber,
-			QuoNumber:       invoice.QuoNumber,
+			Kebutuhan:       invoice.Kebutuhan,
 			ReceiverName:    invoice.ReceiverName,
 			ReceiverAddress: invoice.ReceiverAddress,
 			InvoiceDate:     invoice.InvoiceDate,
@@ -309,7 +307,7 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 	if request.SearchQuery != "" {
 		search := "%" + request.SearchQuery + "%"
 		query = query.Where(
-			"invoice_number LIKE ? OR company_name LIKE ? OR company_contact LIKE ? OR po_number LIKE ? OR quo_number LIKE ?",
+			"invoice_number LIKE ? OR company_name LIKE ? OR company_contact LIKE ? OR po_number LIKE ? OR kebutuhan LIKE ?",
 			search, search, search, search, search,
 		)
 	}
@@ -346,7 +344,7 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 		"invoices.company_address",
 		"invoices.invoice_number",
 		"invoices.po_number",
-		"invoices.quo_number",
+		"invoices.kebutuhan",
 		"invoices.receiver_name",
 		"invoices.receiver_address",
 		"invoices.invoice_date",
@@ -380,7 +378,7 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 			CompanyAddress:  invoice.CompanyAddress,
 			InvoiceNumber:   invoice.InvoiceNumber,
 			PONumber:        invoice.PONumber,
-			QuoNumber:       invoice.QuoNumber,
+			Kebutuhan:       invoice.Kebutuhan,
 			ReceiverName:    invoice.ReceiverName,
 			ReceiverAddress: invoice.ReceiverAddress,
 			InvoiceDate:     invoice.InvoiceDate,
