@@ -19,6 +19,9 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/model"
 )
 
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+const MAX_INVOICE_ITEM = 30
+
 // HashToken returns hex-encoded SHA-256 of the plaintext token. Used so
 // DB-side storage is not a bearer token equivalent: a DB leak alone cannot
 // impersonate a user without also obtaining the plaintext cookie value.
@@ -26,9 +29,6 @@ func HashToken(plain string) string {
 	sum := sha256.Sum256([]byte(plain))
 	return hex.EncodeToString(sum[:])
 }
-
-const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-const MAX_INVOICE_ITEM = 6
 
 func GenerateRandomString(length int) string {
 	b := make([]byte, length)
@@ -116,7 +116,355 @@ func formatRupiah(v float64) string {
 	}
 	return fmt.Sprintf("Rp %s%s", sign, b.String())
 }
+
 func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) {
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.SetAutoPageBreak(false, 0)
+
+	// =========================================================
+	// PAGE CONFIG
+	// =========================================================
+	pageW, pageH := pdf.GetPageSize()
+
+	marginX := 10.0
+	marginTop := 10.0
+
+	pdf.SetMargins(marginX, marginTop, marginX)
+	pdf.AddPage()
+
+	left, top, right, bottom := pdf.GetMargins()
+
+	usableWidth := pageW - left - right
+	_ = pageH - top - bottom
+
+	pdf.SetLineWidth(0.15)
+
+	// =========================================================
+	// TABLE CONFIG
+	// =========================================================
+	// Total must be equal to usableWidth (190mm)
+	colWidths := []float64{
+		10, // No
+		72, // Nama Barang
+		14, // Qty
+		18, // Satuan
+		36, // Harga
+		40, // Jumlah
+	}
+
+	headers := []string{
+		"No",
+		"Nama Barang",
+		"Qty",
+		"Satuan",
+		"Harga",
+		"Jumlah",
+	}
+
+	var tableWidth float64
+	for _, w := range colWidths {
+		tableWidth += w
+	}
+
+	tableX := left
+
+	// =========================================================
+	// LOGO
+	// =========================================================
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+
+	logoPath := filepath.Join(
+		wd,
+		"internal",
+		"assets",
+		"sppg.png",
+	)
+
+	logoWidth := 24.0
+	logoHeight := 24.0
+
+	logoX := left
+	logoY := top
+
+	if _, err := os.Stat(logoPath); err == nil {
+		pdf.Image(
+			logoPath,
+			logoX,
+			logoY,
+			logoWidth,
+			logoHeight,
+			false,
+			"",
+			0,
+			"",
+		)
+	}
+
+	// =========================================================
+	// HEADER
+	// =========================================================
+	// Jarak logo dan teks dipersempit menjadi 1mm
+	headerStartX := left + logoWidth + 1
+	headerWidth := usableWidth - logoWidth - 1
+
+	pdf.SetXY(headerStartX, top+4)
+	pdf.SetFont("Arial", "B", 14) // Font diperbesar
+	pdf.CellFormat(
+		headerWidth,
+		6,
+		"KOPERASI KONSUMEN DEWA MAKMUR MULTI SEJAHTERA",
+		"",
+		1,
+		"C",
+		false,
+		0,
+		"",
+	)
+
+	pdf.SetX(headerStartX)
+	pdf.SetFont("Arial", "B", 12) // Font diperbesar
+	pdf.CellFormat(
+		headerWidth,
+		6,
+		"Kp. Dukuh Desa.Margasari Kec. Ciawi",
+		"",
+		1,
+		"C",
+		false,
+		0,
+		"",
+	)
+
+	pdf.SetX(headerStartX)
+	pdf.SetFont("Arial", "B", 12) // Font diperbesar
+	pdf.CellFormat(
+		headerWidth,
+		6,
+		"INVOICE",
+		"",
+		1,
+		"C",
+		false,
+		0,
+		"",
+	)
+
+	pdf.Ln(6)
+
+	// =========================================================
+	// RECEIVER & META RIGHT
+	// =========================================================
+	sectionStartY := pdf.GetY()
+
+	// LEFT: RECEIVER
+	receiverWidth := 100.0
+	pdf.SetXY(left, sectionStartY)
+	pdf.SetFont("Arial", "B", 10) // Font diperbesar
+	pdf.CellFormat(receiverWidth, 5.5, "Kepada Yth :", "", 1, "L", false, 0, "")
+
+	pdf.SetX(left)
+	pdf.CellFormat(receiverWidth, 5.5, sanitizeLatin1(data.ReceiverName), "", 1, "L", false, 0, "")
+
+	pdf.SetX(left)
+	pdf.SetFont("Arial", "", 10) // Font diperbesar
+	pdf.CellFormat(receiverWidth, 5.5, "Alamat", "", 1, "L", false, 0, "")
+
+	pdf.SetX(left)
+	pdf.MultiCell(receiverWidth, 5.5, sanitizeLatin1(data.ReceiverAddress), "", "L", false)
+
+	// RIGHT: META
+	metaWidth := 75.0
+	rightMetaX := left + usableWidth - metaWidth
+	pdf.SetXY(rightMetaX, sectionStartY)
+
+	labelWidth := 20.0
+	colonWidth := 4.0
+	valueWidth := metaWidth - labelWidth - colonWidth
+
+	metaRows := [][]string{
+		{"Tanggal", data.Date},
+		{"No. Invoice", data.InvoiceNo},
+		{"Kebutuhan", data.PONo},
+	}
+
+	pdf.SetFont("Arial", "", 10) // Font diperbesar
+	for _, row := range metaRows {
+		pdf.SetX(rightMetaX)
+		pdf.CellFormat(labelWidth, 5, row[0], "", 0, "L", false, 0, "")
+		pdf.CellFormat(colonWidth, 5, ":", "", 0, "C", false, 0, "")
+		pdf.CellFormat(valueWidth, 5, sanitizeLatin1(row[1]), "", 1, "L", false, 0, "")
+	}
+
+	pdf.SetY(sectionStartY + 20) // Penyesuaian gap sebelum tabel
+	pdf.Ln(6)
+	// =========================================================
+	// TABLE HEADER
+	// =========================================================
+	headerRowHeight := 5.5        // Baris ditinggikan untuk font yang lebih besar
+	pdf.SetFont("Arial", "B", 10) // Font diperbesar
+	pdf.SetX(tableX)
+
+	for i, h := range headers {
+		pdf.CellFormat(
+			colWidths[i],
+			headerRowHeight,
+			h,
+			"1",
+			0,
+			"C",
+			false,
+			0,
+			"",
+		)
+	}
+	pdf.Ln(-1)
+
+	// =========================================================
+	// TABLE BODY
+	// =========================================================
+	bodyRowHeight := 5.5         // Baris ditinggikan
+	pdf.SetFont("Arial", "", 10) // Font diperbesar
+
+	maxRows := 30
+	var itemsRows []*model.StockResponse
+
+	for i := range data.Items {
+		itemsRows = append(itemsRows, &data.Items[i])
+	}
+
+	if len(itemsRows) > maxRows {
+		itemsRows = itemsRows[:maxRows]
+	}
+
+	for len(itemsRows) < maxRows {
+		itemsRows = append(itemsRows, nil)
+	}
+
+	for i, item := range itemsRows {
+		pdf.SetX(tableX)
+
+		values := []string{"", "", "", "", "", ""}
+
+		if item != nil {
+			values = []string{
+				fmt.Sprintf("%d", i+1),
+				sanitizeLatin1(item.Item.Name),
+				fmt.Sprintf("%g", item.Amount),
+				sanitizeLatin1(item.Item.MeasureUnit),
+				formatRupiah(item.UnitPrice),
+				formatRupiah(item.TotalPrice),
+			}
+		} else {
+			values[0] = fmt.Sprintf("%d", i+1)
+		}
+
+		aligns := []string{"C", "L", "C", "C", "R", "R"}
+
+		for j := range values {
+			pdf.CellFormat(
+				colWidths[j],
+				bodyRowHeight,
+				values[j],
+				"1",
+				0,
+				aligns[j],
+				false,
+				0,
+				"",
+			)
+		}
+		pdf.Ln(-1)
+	}
+
+	// =========================================================
+	// SUMMARY / SUB TOTAL
+	// =========================================================
+	var subtotal float64
+	for _, it := range data.Items {
+		subtotal += it.TotalPrice
+	}
+
+	subtotalX := tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3]
+
+	pdf.SetX(subtotalX)
+	pdf.SetFont("Arial", "B", 10) // Font diperbesar
+	pdf.CellFormat(colWidths[4], 5.5, "Sub Total", "1", 0, "L", false, 0, "")
+	pdf.CellFormat(colWidths[5], 5.5, formatRupiah(subtotal), "1", 1, "R", false, 0, "")
+
+	pdf.Ln(4)
+
+	// =========================================================
+	// FOOTER & SIGNATURES
+	// =========================================================
+	footerStartY := pdf.GetY()
+
+	// FOOTER (Left)
+	footerLeftWidth := 120.0
+	pdf.SetXY(left, footerStartY-8)
+	pdf.SetFont("Arial", "", 10) // Font diperbesar
+
+	footerLineHeight := 5.0
+	pdf.CellFormat(footerLeftWidth, footerLineHeight, "Pembayaran Invoice:", "", 1, "L", false, 0, "")
+
+	pdf.SetX(left)
+	pdf.CellFormat(footerLeftWidth, footerLineHeight, "Bank BNI", "", 1, "L", false, 0, "")
+
+	pdf.SetX(left)
+	pdf.CellFormat(footerLeftWidth, footerLineHeight, fmt.Sprintf("No. Rekening : %s", sanitizeLatin1(data.BankAccount)), "", 1, "L", false, 0, "")
+
+	pdf.SetX(left)
+	pdf.CellFormat(footerLeftWidth, footerLineHeight, "Atas Nama : Koperasi Konsumen Dewa Makmur Multi Sejahtera", "", 1, "L", false, 0, "")
+
+	pdf.Ln(2)
+
+	// SIGNATURES
+	signY := pdf.GetY()
+
+	leftSignWidth := 50.0
+	rightSignWidth := 50.0
+
+	leftSignX := left + 10
+	rightSignX := left + usableWidth - rightSignWidth - 10
+
+	signGapHeight := 15.0
+
+	pdf.SetFont("Arial", "", 10) // Font diperbesar
+
+	// LEFT SIGN
+	pdf.SetXY(leftSignX, signY)
+	pdf.CellFormat(leftSignWidth, 5, "Penerima", "", 1, "C", false, 0, "")
+
+	pdf.Ln(signGapHeight)
+	pdf.SetX(leftSignX)
+	pdf.CellFormat(leftSignWidth, 5, "(                     )", "", 0, "C", false, 0, "")
+
+	// RIGHT SIGN
+	pdf.SetY(signY)
+	pdf.SetX(rightSignX)
+	pdf.CellFormat(rightSignWidth, 5, "Hormat Kami", "", 1, "C", false, 0, "")
+
+	pdf.Ln(signGapHeight)
+	pdf.SetX(rightSignX)
+
+	// Print Penanggungjawab under Hormat Kami
+	pdf.CellFormat(rightSignWidth, 5, sanitizeLatin1(data.Penanggungjawab), "", 1, "C", false, 0, "")
+
+	// =========================================================
+	// OUTPUT
+	// =========================================================
+	var buf bytes.Buffer
+
+	if err := pdf.Output(&buf); err != nil {
+		return nil, err
+	}
+
+	return &buf, nil
+}
+
+func GenerateTemplateInvoicePDFV1(data *model.InvoiceData) (*bytes.Buffer, error) {
 	pdf := fpdf.New("L", "mm", "A5", "")
 	pdf.SetMargins(10, 17, 10)
 
