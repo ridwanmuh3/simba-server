@@ -35,6 +35,7 @@ WORKDIR /app
 COPY --from=builder /out/app     /app/app
 COPY --from=builder /out/seed    /app/seed
 COPY --from=builder /out/migrate /app/migrate
+COPY --from=builder /assets/sppg.png /app/assets/sppg.png
 
 RUN adduser -D -H -u 10001 appuser && \
     mkdir -p /app/logs /app/uploads && \
