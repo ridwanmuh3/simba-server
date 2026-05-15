@@ -20,7 +20,7 @@ import (
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-const MAX_INVOICE_ITEM = 30
+const MAX_INVOICE_ITEM = 40
 
 // HashToken returns hex-encoded SHA-256 of the plaintext token. Used so
 // DB-side storage is not a bearer token equivalent: a DB leak alone cannot
@@ -127,7 +127,7 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	pageW, pageH := pdf.GetPageSize()
 
 	marginX := 10.0
-	marginTop := 10.0
+	marginTop := 5.0
 
 	pdf.SetMargins(marginX, marginTop, marginX)
 	pdf.AddPage()
@@ -182,8 +182,8 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 		"sppg.png",
 	)
 
-	logoWidth := 24.0
-	logoHeight := 24.0
+	logoWidth := 26.0
+	logoHeight := 26.0
 
 	logoX := left
 	logoY := top
@@ -224,7 +224,7 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	)
 
 	pdf.SetX(headerStartX)
-	pdf.SetFont("Arial", "B", 12) // Font diperbesar
+	pdf.SetFont("Arial", "B", 10) // Font diperbesar
 	pdf.CellFormat(
 		headerWidth,
 		6,
@@ -251,7 +251,7 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 		"",
 	)
 
-	pdf.Ln(6)
+	pdf.Ln(4)
 
 	// =========================================================
 	// RECEIVER & META RIGHT
@@ -286,7 +286,7 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	metaRows := [][]string{
 		{"Tanggal", data.Date},
 		{"No. Invoice", data.InvoiceNo},
-		{"Kebutuhan", data.PONo},
+		{"Kebutuhan", data.Kebutuhan},
 	}
 
 	pdf.SetFont("Arial", "", 10) // Font diperbesar
@@ -298,12 +298,12 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	}
 
 	pdf.SetY(sectionStartY + 20) // Penyesuaian gap sebelum tabel
-	pdf.Ln(6)
+	pdf.Ln(4)
 	// =========================================================
 	// TABLE HEADER
 	// =========================================================
-	headerRowHeight := 5.5        // Baris ditinggikan untuk font yang lebih besar
-	pdf.SetFont("Arial", "B", 10) // Font diperbesar
+	headerRowHeight := 5.5       // Baris ditinggikan untuk font yang lebih besar
+	pdf.SetFont("Arial", "B", 9) // Font diperbesar
 	pdf.SetX(tableX)
 
 	for i, h := range headers {
@@ -324,10 +324,10 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	// =========================================================
 	// TABLE BODY
 	// =========================================================
-	bodyRowHeight := 5.5         // Baris ditinggikan
-	pdf.SetFont("Arial", "", 10) // Font diperbesar
+	bodyRowHeight := 5.5        // Baris ditinggikan
+	pdf.SetFont("Arial", "", 9) // Font diperbesar
 
-	maxRows := 30
+	maxRows := 33
 	var itemsRows []*model.StockResponse
 
 	for i := range data.Items {
@@ -389,7 +389,7 @@ func GenerateTemplateInvoicePDF(data *model.InvoiceData) (*bytes.Buffer, error) 
 	subtotalX := tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3]
 
 	pdf.SetX(subtotalX)
-	pdf.SetFont("Arial", "B", 10) // Font diperbesar
+	pdf.SetFont("Arial", "B", 9) // Font diperbesar
 	pdf.CellFormat(colWidths[4], 5.5, "Sub Total", "1", 0, "L", false, 0, "")
 	pdf.CellFormat(colWidths[5], 5.5, formatRupiah(subtotal), "1", 1, "R", false, 0, "")
 

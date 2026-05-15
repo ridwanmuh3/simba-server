@@ -1,7 +1,12 @@
 package util
 
 import (
+	"bytes"
+	"compress/flate"
+	"compress/zlib"
+	"io"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/ridwanmuh3/simba-server/internal/model"
@@ -9,6 +14,59 @@ import (
 
 func almostEqual(a, b, eps float64) bool {
 	return math.Abs(a-b) <= eps
+}
+
+func extractPDFText(t *testing.T, pdf []byte) string {
+	t.Helper()
+
+	parts := []string{string(pdf)}
+	remaining := pdf
+
+	for {
+		streamStart := bytes.Index(remaining, []byte("stream"))
+		if streamStart == -1 {
+			break
+		}
+
+		streamDataStart := streamStart + len("stream")
+		if streamDataStart < len(remaining) {
+			switch remaining[streamDataStart] {
+			case '\r':
+				streamDataStart++
+				if streamDataStart < len(remaining) && remaining[streamDataStart] == '\n' {
+					streamDataStart++
+				}
+			case '\n':
+				streamDataStart++
+			}
+		}
+
+		endOffset := bytes.Index(remaining[streamDataStart:], []byte("endstream"))
+		if endOffset == -1 {
+			break
+		}
+
+		stream := bytes.Trim(remaining[streamDataStart:streamDataStart+endOffset], "\r\n")
+
+		if reader, err := zlib.NewReader(bytes.NewReader(stream)); err == nil {
+			decompressed, readErr := io.ReadAll(reader)
+			_ = reader.Close()
+			if readErr == nil && len(decompressed) > 0 {
+				parts = append(parts, string(decompressed))
+			}
+		} else {
+			reader := flate.NewReader(bytes.NewReader(stream))
+			decompressed, readErr := io.ReadAll(reader)
+			_ = reader.Close()
+			if readErr == nil && len(decompressed) > 0 {
+				parts = append(parts, string(decompressed))
+			}
+		}
+
+		remaining = remaining[streamDataStart+endOffset+len("endstream"):]
+	}
+
+	return strings.Join(parts, "\n")
 }
 
 func TestRound2_DecimalPrecision(t *testing.T) {
@@ -104,5 +162,77 @@ func TestGenerateTemplateInvoicePDF_SubtotalMatchesLineSum(t *testing.T) {
 	}
 	if !almostEqual(sum, data.GrandTotal, 0.001) {
 		t.Errorf("subtotal sum %v ≠ GrandTotal %v", sum, data.GrandTotal)
+	}
+}
+
+func TestGenerateTemplateInvoicePDF_UsesKebutuhanValue(t *testing.T) {
+	data := &model.InvoiceData{
+		CompanyName:     "PT Test",
+		CompanyAddress:  "Jl Test",
+		CompanyContact:  "0800",
+		InvoiceNo:       "INV-777",
+		PONo:            "PO-123",
+		Kebutuhan:       "Kebutuhan Catering",
+		Date:            "14 Mei 2026",
+		ReceiverName:    "Client",
+		ReceiverAddress: "Jl Client",
+		Penanggungjawab: "PIC",
+		Jabatan:         "Manager",
+		Items: []model.StockResponse{
+			{
+				Amount:     1,
+				UnitPrice:  10000,
+				TotalPrice: 10000,
+				Item:       model.ItemResponse{Name: "Beras", MeasureUnit: "kg"},
+			},
+		},
+		GrandTotal: 10000,
+	}
+
+	buf, err := GenerateTemplateInvoicePDF(data)
+	if err != nil {
+		t.Fatalf("GenerateTemplateInvoicePDF error: %v", err)
+	}
+
+	text := extractPDFText(t, buf.Bytes())
+	if !strings.Contains(text, "Kebutuhan") {
+		t.Fatalf("pdf text missing kebutuhan label: %q", text)
+	}
+	if !strings.Contains(text, data.Kebutuhan) {
+		t.Fatalf("pdf text missing kebutuhan value %q: %q", data.Kebutuhan, text)
+	}
+	if strings.Contains(text, data.PONo) {
+		t.Fatalf("pdf text should not render po number %q in kebutuhan row: %q", data.PONo, text)
+	}
+}
+
+func TestGenerateTemplateInvoicePDF_AllowsEmptyKebutuhan(t *testing.T) {
+	data := &model.InvoiceData{
+		CompanyName:     "PT Test",
+		CompanyAddress:  "Jl Test",
+		CompanyContact:  "0800",
+		InvoiceNo:       "INV-888",
+		Date:            "14 Mei 2026",
+		ReceiverName:    "Client",
+		ReceiverAddress: "Jl Client",
+		Penanggungjawab: "PIC",
+		Jabatan:         "Manager",
+		Items: []model.StockResponse{
+			{
+				Amount:     1,
+				UnitPrice:  15000,
+				TotalPrice: 15000,
+				Item:       model.ItemResponse{Name: "Gula", MeasureUnit: "kg"},
+			},
+		},
+		GrandTotal: 15000,
+	}
+
+	buf, err := GenerateTemplateInvoicePDF(data)
+	if err != nil {
+		t.Fatalf("GenerateTemplateInvoicePDF error: %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Fatal("empty pdf buffer")
 	}
 }
