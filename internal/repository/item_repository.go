@@ -21,8 +21,18 @@ func NewItemRepository() *ItemRepository {
 
 func (r *ItemRepository) AddBatches(db *gorm.DB, items []entity.Item) error {
 	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "name"}, {Name: "dapur_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"stock", "unit_price", "modified_by"}),
+		Columns: []clause.Column{{Name: "name"}, {Name: "dapur_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"category",
+			"initial_stock",
+			"stock",
+			"measure_unit",
+			"unit_price",
+			"total_price",
+			"modified_by",
+			"updated_at",
+			"deleted_at",
+		}),
 	}).Create(&items).Error
 }
 

@@ -102,7 +102,7 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 	defer src.Close()
 
 	reader := csv.NewReader(src)
-	reader.FieldsPerRecord = 5
+	reader.FieldsPerRecord = -1
 
 	var items []model.AddItemRequest
 	lineCount := 0
@@ -124,33 +124,53 @@ func (h *ItemHandler) ImportItems(c *fiber.Ctx) error {
 			return exception.InvalidCsvFormatError
 		}
 
-		// Skip Header
-		if lineCount == 1 {
+		if lineCount == 1 && len(record) == 1 && strings.HasPrefix(strings.ToLower(strings.TrimSpace(record[0])), "sep=") {
 			continue
 		}
 
-		if strings.TrimSpace(record[0]) == "" {
+		firstColumn := strings.TrimSpace(record[0])
+
+		// Skip Header
+		if len(items) == 0 && (strings.EqualFold(firstColumn, "nama") || strings.EqualFold(firstColumn, "tanggal input")) {
+			continue
+		}
+
+		fields := record
+		if len(record) == 6 {
+			if _, err := strconv.ParseFloat(record[2], 64); err != nil {
+				fields = record[1:]
+			} else {
+				fields = record[:5]
+			}
+		}
+
+		if len(fields) != 5 {
+			h.log.Warnf("CSV line %d: incorrect column count", lineCount)
+			return exception.InvalidCsvFormatError
+		}
+
+		if strings.TrimSpace(fields[0]) == "" {
 			h.log.Warnf("CSV line %d: name is empty", lineCount)
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Baris %d: Nama barang tidak boleh kosong", lineCount))
 		}
 
-		stock, err := strconv.ParseFloat(record[2], 64)
+		stock, err := strconv.ParseFloat(fields[2], 64)
 		if err != nil || stock < 0 {
-			h.log.Warnf("CSV line %d: invalid stock format '%s'", lineCount, record[2])
+			h.log.Warnf("CSV line %d: invalid stock format '%s'", lineCount, fields[2])
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Baris %d: Format stok salah (harus angka)", lineCount))
 		}
 
-		price, err := strconv.ParseFloat(record[4], 64)
+		price, err := strconv.ParseFloat(fields[4], 64)
 		if err != nil || price < 0 {
-			h.log.Warnf("CSV line %d: invalid price format '%s'", lineCount, record[4])
+			h.log.Warnf("CSV line %d: invalid price format '%s'", lineCount, fields[4])
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Baris %d: Format harga salah (harus angka)", lineCount))
 		}
 
 		item := model.AddItemRequest{
-			Name:        strings.TrimSpace(record[0]),
-			Category:    strings.TrimSpace(record[1]),
+			Name:        strings.TrimSpace(fields[0]),
+			Category:    strings.TrimSpace(fields[1]),
 			Stock:       stock,
-			MeasureUnit: strings.TrimSpace(record[3]),
+			MeasureUnit: strings.TrimSpace(fields[3]),
 			UnitPrice:   price,
 			ModifiedBy:  auth.Fullname,
 			DapurID:     *auth.CurrentDapurID,
