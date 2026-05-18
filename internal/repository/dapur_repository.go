@@ -1,8 +1,9 @@
 package repository
 
 import (
-	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"gorm.io/gorm"
+
+	"github.com/ridwanmuh3/simba-server/internal/entity"
 )
 
 type DapurRepository struct {
@@ -15,7 +16,7 @@ func NewDapurRepository() *DapurRepository {
 
 func (r *DapurRepository) FindAll(db *gorm.DB) ([]entity.Dapur, error) {
 	var dapurs []entity.Dapur
-	err := db.Order("created_at DESC, id DESC").Find(&dapurs).Error
+	err := db.Order("created_at ASC, id ASC").Find(&dapurs).Error
 	return dapurs, err
 }
 
