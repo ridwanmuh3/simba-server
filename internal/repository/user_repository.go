@@ -40,9 +40,9 @@ func (r *UserRepository) FindAll(db *gorm.DB, query *model.FindAllUserRequest) (
 	var users []entity.User
 
 	orderBy := clause.OrderBy{Columns: []clause.OrderByColumn{
-		{Column: clause.Column{Name: "created_at"}, Desc: false},
-		{Column: clause.Column{Name: "updated_at"}, Desc: false},
-		{Column: clause.Column{Name: "is_active"}, Desc: false},
+		{Column: clause.Column{Name: "updated_at"}, Desc: true},
+		{Column: clause.Column{Name: "created_at"}, Desc: true},
+		{Column: clause.Column{Name: "id"}, Desc: true},
 	}}
 
 	if err := db.Scopes(r.FilterUser(query)).Offset((query.Page - 1) * query.Size).Limit(query.Size).Order(orderBy).Find(&users).Error; err != nil {

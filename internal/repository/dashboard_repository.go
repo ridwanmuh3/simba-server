@@ -83,7 +83,7 @@ func (r *DashboardRepository) GetRecentActivities(db *gorm.DB, dapurID uint, lim
 		Select("id, type, title, description, created_at").
 		Where("dapur_id = ? AND deleted_at IS NULL", dapurID).
 		Limit(limit).
-		Order("created_at ASC").
+		Order("created_at DESC, id DESC").
 		Scan(&activities).Error
 	return activities, err
 }

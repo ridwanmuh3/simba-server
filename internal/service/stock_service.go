@@ -73,7 +73,7 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 	err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("item_id = ? AND dapur_id = ? AND deleted_at IS NULL", item.ID, request.DapurID).
-		Order("created_at ASC, id ASC, updated_at ASC").
+		Order("created_at DESC, id DESC").
 		First(&last).Error
 
 	var previousStock float64
@@ -313,7 +313,7 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 	for i := range tracks {
 		if err := tx.Model(&entity.StockTracking{}).
 			Where("id = ?", tracks[i].ID).
-			Updates(map[string]any{
+			UpdateColumns(map[string]any{
 				"previous_stock": tracks[i].PreviousStock,
 				"new_stock":      tracks[i].NewStock,
 				"total_price":    tracks[i].TotalPrice,
@@ -460,7 +460,7 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 	for i := range tracks {
 		if err := tx.Model(&entity.StockTracking{}).
 			Where("id = ?", tracks[i].ID).
-			Updates(map[string]any{
+			UpdateColumns(map[string]any{
 				"previous_stock": tracks[i].PreviousStock,
 				"new_stock":      tracks[i].NewStock,
 				"total_price":    tracks[i].TotalPrice,
@@ -641,7 +641,7 @@ func (s *StockService) GetItemStocksSummary(ctx context.Context, request *model.
             items.initial_stock,
             items.unit_price
         `).
-		Order("items.updated_at ASC").
+		Order("items.updated_at DESC, items.created_at DESC, items.id DESC").
 		Limit(request.Size).
 		Offset(offset).
 		Find(&responses).Error

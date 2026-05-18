@@ -31,7 +31,7 @@ func (r *Repository[T]) CountById(db *gorm.DB, id any) (int64, error) {
 
 func OrderBy() clause.OrderBy {
 	return clause.OrderBy{Columns: []clause.OrderByColumn{
-		{Column: clause.Column{Name: "created_at"}, Desc: false},
-		{Column: clause.Column{Name: "updated_at"}, Desc: false},
+		{Column: clause.Column{Name: "updated_at"}, Desc: true},
+		{Column: clause.Column{Name: "created_at"}, Desc: true},
 	}}
 }

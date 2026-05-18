@@ -22,7 +22,7 @@ func (l *ActivityLog) AfterCreate(tx *gorm.DB) (err error) {
 
 	if err = tx.Model(l).
 		Where("dapur_id = ?", l.DapurID).
-		Order("created_at ASC").
+		Order("created_at DESC, id DESC").
 		Offset(4).
 		Pluck("id", &ids).Error; err != nil {
 		return

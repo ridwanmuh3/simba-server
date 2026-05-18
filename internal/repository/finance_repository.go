@@ -68,7 +68,9 @@ func (r *FinanceRepository) FindAllUnpaginated(db *gorm.DB, dapurID uint) ([]ent
 		return nil, 0, err
 	}
 
-	if err := db.Where("dapur_id = ?", dapurID).Find(&finances).Error; err != nil {
+	if err := db.Where("dapur_id = ?", dapurID).
+		Order("updated_at DESC, created_at DESC, id DESC").
+		Find(&finances).Error; err != nil {
 		return nil, 0, err
 	}
 

@@ -35,7 +35,10 @@ func nextItemNumber(tx *gorm.DB) (int, error) {
 	}
 
 	var lastItem entity.Item
-	err := tx.Unscoped().Order("id ASC").First(&lastItem).Error
+	err := tx.Unscoped().
+		Where("id ~ ?", `^MBG-BHN-[0-9]+$`).
+		Order("CAST(split_part(id, '-', 3) AS INTEGER) DESC").
+		First(&lastItem).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return 1, nil
@@ -271,7 +274,7 @@ func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemReque
 	for i := range stockTracks {
 		if err := tx.Model(&entity.StockTracking{}).
 			Where("id = ?", stockTracks[i].ID).
-			Updates(map[string]any{
+			UpdateColumns(map[string]any{
 				"previous_stock": stockTracks[i].PreviousStock,
 				"new_stock":      stockTracks[i].NewStock,
 			}).Error; err != nil {
@@ -404,7 +407,7 @@ func (s *ItemService) ExportItems(ctx context.Context, dapurID uint) ([]model.It
 	var items []entity.Item
 	if err := db.Model(new(entity.Item)).
 		Where("dapur_id = ?", dapurID).
-		Order("created_at ASC").Find(&items).Error; err != nil {
+		Order("updated_at DESC, created_at DESC, id DESC").Find(&items).Error; err != nil {
 		s.log.Errorf("failed to export all items: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
