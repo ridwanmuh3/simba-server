@@ -73,7 +73,7 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 	err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("item_id = ? AND dapur_id = ? AND deleted_at IS NULL", item.ID, request.DapurID).
-		Order("created_at DESC, id DESC, updated_at DESC").
+		Order("created_at ASC, id ASC, updated_at ASC").
 		First(&last).Error
 
 	var previousStock float64
@@ -641,7 +641,7 @@ func (s *StockService) GetItemStocksSummary(ctx context.Context, request *model.
             items.initial_stock,
             items.unit_price
         `).
-		Order("items.updated_at DESC").
+		Order("items.updated_at ASC").
 		Limit(request.Size).
 		Offset(offset).
 		Find(&responses).Error

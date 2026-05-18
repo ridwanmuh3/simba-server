@@ -35,7 +35,7 @@ func nextItemNumber(tx *gorm.DB) (int, error) {
 	}
 
 	var lastItem entity.Item
-	err := tx.Unscoped().Order("id DESC").First(&lastItem).Error
+	err := tx.Unscoped().Order("id ASC").First(&lastItem).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return 1, nil
@@ -98,16 +98,16 @@ func (s *ItemService) Add(ctx context.Context, request *model.AddItemRequest) (*
 
 	stock := util.Round4(request.Stock)
 	item := &entity.Item{
-		ID:               newID,
-		Name:             request.Name,
-		Category:         request.Category,
-		InitialStock:     stock,
-		Stock:            stock,
-		UnitPrice:        request.UnitPrice,
-		MeasureUnit:      request.MeasureUnit,
-		TotalPrice:       util.GetTotalPrice(stock, request.UnitPrice),
-		ModifiedBy:       request.ModifiedBy,
-		DapurID:          request.DapurID,
+		ID:           newID,
+		Name:         request.Name,
+		Category:     request.Category,
+		InitialStock: stock,
+		Stock:        stock,
+		UnitPrice:    request.UnitPrice,
+		MeasureUnit:  request.MeasureUnit,
+		TotalPrice:   util.GetTotalPrice(stock, request.UnitPrice),
+		ModifiedBy:   request.ModifiedBy,
+		DapurID:      request.DapurID,
 	}
 	if request.DateAdded != nil {
 		item.CreatedAt = *request.DateAdded
@@ -164,16 +164,16 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 		nextNum++
 
 		item := entity.Item{
-			ID:               newID,
-			Name:             reqItem.Name,
-			Category:         reqItem.Category,
-			Stock:            reqItem.Stock,
-			InitialStock:     reqItem.Stock,
-			MeasureUnit:      reqItem.MeasureUnit,
-			UnitPrice:        reqItem.UnitPrice,
-			TotalPrice:       util.GetTotalPrice(reqItem.Stock, reqItem.UnitPrice),
-			ModifiedBy:       reqItem.ModifiedBy,
-			DapurID:          request.DapurID,
+			ID:           newID,
+			Name:         reqItem.Name,
+			Category:     reqItem.Category,
+			Stock:        reqItem.Stock,
+			InitialStock: reqItem.Stock,
+			MeasureUnit:  reqItem.MeasureUnit,
+			UnitPrice:    reqItem.UnitPrice,
+			TotalPrice:   util.GetTotalPrice(reqItem.Stock, reqItem.UnitPrice),
+			ModifiedBy:   reqItem.ModifiedBy,
+			DapurID:      request.DapurID,
 		}
 		items = append(items, item)
 	}
@@ -404,7 +404,7 @@ func (s *ItemService) ExportItems(ctx context.Context, dapurID uint) ([]model.It
 	var items []entity.Item
 	if err := db.Model(new(entity.Item)).
 		Where("dapur_id = ?", dapurID).
-		Order("created_at DESC").Find(&items).Error; err != nil {
+		Order("created_at ASC").Find(&items).Error; err != nil {
 		s.log.Errorf("failed to export all items: %v", err)
 		return nil, 0, exception.InternalServerError
 	}

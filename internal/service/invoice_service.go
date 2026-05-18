@@ -360,7 +360,7 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 	var invoices []invoiceHistoryRow
 	if err := query.
 		Select(strings.Join(selectColumns, ", ")).
-		Order("invoices.created_at DESC").
+		Order("invoices.created_at ASC").
 		Offset((page - 1) * size).
 		Limit(size).
 		Scan(&invoices).Error; err != nil {
@@ -565,7 +565,7 @@ func (s *InvoiceService) GetInvoiceItemsFlat(ctx context.Context, req *model.Get
 			END AS total_sell_price
 		`).
 		Joins("LEFT JOIN items ON invoice_items.item_id = items.id AND items.deleted_at IS NULL").
-		Order("invoices.created_at DESC, invoice_items.id ASC").
+		Order("invoices.created_at ASC, invoice_items.id ASC").
 		Offset((page - 1) * size).
 		Limit(size).
 		Scan(&rows).Error

@@ -69,7 +69,7 @@ func (r *ItemRepository) FindLastStockPrice(db *gorm.DB, itemID string, stockTyp
 	var stock entity.StockTracking
 	err := db.Select("unit_price").
 		Where("item_id = ? AND type = ? AND dapur_id = ?", itemID, stockType, dapurID).
-		Order("created_at DESC").
+		Order("created_at ASC").
 		Take(&stock).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, nil
