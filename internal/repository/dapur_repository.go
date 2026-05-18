@@ -15,7 +15,7 @@ func NewDapurRepository() *DapurRepository {
 
 func (r *DapurRepository) FindAll(db *gorm.DB) ([]entity.Dapur, error) {
 	var dapurs []entity.Dapur
-	err := db.Order("updated_at DESC, created_at DESC, id DESC").Find(&dapurs).Error
+	err := db.Order("created_at DESC, id DESC").Find(&dapurs).Error
 	return dapurs, err
 }
 

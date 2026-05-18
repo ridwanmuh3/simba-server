@@ -641,7 +641,7 @@ func (s *StockService) GetItemStocksSummary(ctx context.Context, request *model.
             items.initial_stock,
             items.unit_price
         `).
-		Order("items.updated_at DESC, items.created_at DESC, items.id DESC").
+		Order("items.created_at DESC, items.id DESC").
 		Limit(request.Size).
 		Offset(offset).
 		Find(&responses).Error

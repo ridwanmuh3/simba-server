@@ -407,7 +407,7 @@ func (s *ItemService) ExportItems(ctx context.Context, dapurID uint) ([]model.It
 	var items []entity.Item
 	if err := db.Model(new(entity.Item)).
 		Where("dapur_id = ?", dapurID).
-		Order("updated_at DESC, created_at DESC, id DESC").Find(&items).Error; err != nil {
+		Order("created_at DESC, id DESC").Find(&items).Error; err != nil {
 		s.log.Errorf("failed to export all items: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
