@@ -502,12 +502,12 @@ func (s *InvoiceService) GetInvoiceItemsFlat(ctx context.Context, req *model.Get
 	}
 	if req.StartDate != "" {
 		if parsed, err := time.Parse(time.RFC3339Nano, req.StartDate); err == nil {
-			base = base.Where("invoices.created_at >= ?", parsed.UTC())
+			base = base.Where("invoice_items.created_at >= ?", parsed.UTC())
 		}
 	}
 	if req.EndDate != "" {
 		if parsed, err := time.Parse(time.RFC3339Nano, req.EndDate); err == nil {
-			base = base.Where("invoices.created_at <= ?", parsed.UTC())
+			base = base.Where("invoice_items.created_at <= ?", parsed.UTC())
 		}
 	}
 
@@ -518,22 +518,22 @@ func (s *InvoiceService) GetInvoiceItemsFlat(ctx context.Context, req *model.Get
 	}
 
 	type flatRow struct {
-		Date           string  `gorm:"column:date"`
-		InvoiceNumber  string  `gorm:"column:invoice_number"`
-		ItemName       string  `gorm:"column:item_name"`
-		MeasureUnit    string  `gorm:"column:measure_unit"`
-		Amount         float64 `gorm:"column:amount"`
-		StockType      string  `gorm:"column:stock_type"`
-		BuyPrice       float64 `gorm:"column:buy_price"`
-		SellPrice      float64 `gorm:"column:sell_price"`
-		TotalBuyPrice  float64 `gorm:"column:total_buy_price"`
-		TotalSellPrice float64 `gorm:"column:total_sell_price"`
+		Date           time.Time `gorm:"column:date"`
+		InvoiceNumber  string    `gorm:"column:invoice_number"`
+		ItemName       string    `gorm:"column:item_name"`
+		MeasureUnit    string    `gorm:"column:measure_unit"`
+		Amount         float64   `gorm:"column:amount"`
+		StockType      string    `gorm:"column:stock_type"`
+		BuyPrice       float64   `gorm:"column:buy_price"`
+		SellPrice      float64   `gorm:"column:sell_price"`
+		TotalBuyPrice  float64   `gorm:"column:total_buy_price"`
+		TotalSellPrice float64   `gorm:"column:total_sell_price"`
 	}
 
 	var rows []flatRow
 	err := base.
 		Select(`
-			invoices.invoice_date AS date,
+			invoice_items.created_at AS date,
 			invoices.invoice_number,
 			invoice_items.item_name,
 			invoice_items.measure_unit,
@@ -576,8 +576,12 @@ func (s *InvoiceService) GetInvoiceItemsFlat(ctx context.Context, req *model.Get
 
 	responses := make([]model.InvoiceItemFlatResponse, len(rows))
 	for i, r := range rows {
+		date := ""
+		if !r.Date.IsZero() {
+			date = r.Date.Format("2006-01-02")
+		}
 		responses[i] = model.InvoiceItemFlatResponse{
-			Date:           r.Date,
+			Date:           date,
 			InvoiceNumber:  r.InvoiceNumber,
 			ItemName:       r.ItemName,
 			MeasureUnit:    r.MeasureUnit,
