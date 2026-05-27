@@ -1,11 +1,10 @@
 package handler
 
 import (
-	"math"
+	"context"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
 	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
@@ -14,14 +13,30 @@ import (
 )
 
 type UserHandler struct {
-	config      *viper.Viper
+	resetSecret string
 	log         *zap.SugaredLogger
-	userService *service.UserService
+	userService UserService
 }
 
-func NewUserHandler(config *viper.Viper, logger *zap.SugaredLogger, userService *service.UserService) *UserHandler {
+type UserService interface {
+	Create(ctx context.Context, request *model.CreateUserRequest) (*model.UserResponse, error)
+	Update(ctx context.Context, request *model.UpdateUserRequest) (*model.UserResponse, error)
+	Delete(ctx context.Context, request *model.DeleteUserRequest) (bool, error)
+	FindById(ctx context.Context, request *model.FindByIdUserRequest) (*model.UserResponse, error)
+	FindAll(ctx context.Context, request *model.FindAllUserRequest) ([]model.UserResponse, int64, error)
+	ResetPassword(ctx context.Context, request *model.ResetPasswordRequest) error
+	GetUsersStats(ctx context.Context) (*model.UsersStatsResponse, error)
+	Login(ctx context.Context, request *model.LoginUserRequest) (*model.Auth, error)
+	RefreshSession(ctx context.Context, request *model.RefreshSessionRequest) (*model.Auth, error)
+	Logout(ctx context.Context, request *model.LogoutUserRequest) (bool, error)
+	Heartbeat(ctx context.Context, userID int) error
+}
+
+var _ UserService = (*service.UserService)(nil)
+
+func NewUserHandler(resetSecret string, logger *zap.SugaredLogger, userService UserService) *UserHandler {
 	return &UserHandler{
-		config:      config,
+		resetSecret: resetSecret,
 		log:         logger,
 		userService: userService,
 	}
@@ -138,24 +153,16 @@ func (h *UserHandler) FindAll(c *fiber.Ctx) error {
 		return err
 	}
 
-	pagingMetadata := &model.PageMetadata{
-		Page:      request.Page,
-		Size:      request.Size,
-		TotalItem: total,
-		TotalPage: int64(math.Ceil(float64(total) / float64(request.Size))),
-	}
-
 	return c.JSON(model.Response[[]model.UserResponse]{
 		Status:  fiber.StatusOK,
 		Message: "find all users success",
 		Data:    response,
-		Paging:  pagingMetadata,
+		Paging:  newPageMetadata(request.Page, request.Size, total),
 	})
 }
 
 func (h *UserHandler) Register(c *fiber.Ctx) error {
-	secret := h.config.GetString("APP_RESET_SECRET")
-	if secret == "" || c.Get("X-Reset-Secret") != secret {
+	if h.resetSecret == "" || c.Get("X-Reset-Secret") != h.resetSecret {
 		h.log.Warnf("register: invalid or missing secret")
 		return fiber.ErrUnauthorized
 	}
@@ -180,8 +187,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 }
 
 func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
-	secret := h.config.GetString("APP_RESET_SECRET")
-	if secret == "" || c.Get("X-Reset-Secret") != secret {
+	if h.resetSecret == "" || c.Get("X-Reset-Secret") != h.resetSecret {
 		h.log.Warnf("reset-password: invalid or missing secret")
 		return fiber.ErrUnauthorized
 	}
@@ -190,14 +196,6 @@ func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
 	if err := c.BodyParser(request); err != nil {
 		h.log.Warnf("reset-password: failed to parse body: %v", err)
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
-	}
-
-	if request.Username == "" || request.NewPassword == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "username and new_password required")
-	}
-
-	if len(request.NewPassword) < 4 {
-		return fiber.NewError(fiber.StatusBadRequest, "new_password min 4 characters")
 	}
 
 	if err := h.userService.ResetPassword(c.Context(), request); err != nil {

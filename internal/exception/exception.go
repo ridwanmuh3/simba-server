@@ -12,8 +12,6 @@ var (
 	InvalidFileFormatError     = fiber.NewError(fiber.StatusBadRequest, "invalid file format")
 	InvalidCsvFormatError      = fiber.NewError(fiber.StatusUnprocessableEntity, "only accept csv format")
 	ExceedMaximumFileSizeError = fiber.NewError(fiber.StatusUnprocessableEntity, "system only accept uploaded file size below 10MB")
-	ForbiddenFilepathError     = fiber.NewError(fiber.StatusForbidden, "accessing path not allowed")
-	FileNotFoundError          = fiber.NewError(fiber.StatusNotFound, "file not found")
 	InternalServerError        = fiber.NewError(fiber.StatusInternalServerError, "internal server error")
 )
 

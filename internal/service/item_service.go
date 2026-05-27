@@ -66,7 +66,6 @@ type ItemService struct {
 
 type ItemRepository interface {
 	Save(db *gorm.DB, entity *entity.Item) error
-	Update(db *gorm.DB, entity *entity.Item, id any) error
 	FindById(db *gorm.DB, entity *entity.Item, id any) error
 	FindAll(db *gorm.DB, query *model.FindAllItemsRequest) ([]entity.Item, int64, error)
 	AddBatches(db *gorm.DB, items []entity.Item) error

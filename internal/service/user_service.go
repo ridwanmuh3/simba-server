@@ -161,11 +161,6 @@ func (s *UserService) Delete(ctx context.Context, request *model.DeleteUserReque
 		}
 	}
 
-	// if user.IsActive {
-	// 	s.log.Errorf("failed to delete currently active user")
-	// 	return false, exception.UserDeleteActiveUserError
-	// }
-
 	if err := s.userRepository.Delete(tx, user); err != nil {
 		s.log.Errorf("failed to delete user by id: %v", err)
 		return false, exception.InternalServerError
@@ -221,6 +216,11 @@ func (s *UserService) FindAll(ctx context.Context, request *model.FindAllUserReq
 func (s *UserService) ResetPassword(ctx context.Context, request *model.ResetPasswordRequest) error {
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
+
+	if err := s.validate.Struct(request); err != nil {
+		s.log.Errorf("failed to validate request body: %v", err)
+		return err
+	}
 
 	user := new(entity.User)
 	if err := s.userRepository.FindByUsername(tx, user, request.Username); err != nil {

@@ -1,16 +1,10 @@
 package handler
 
 import (
-	"math"
-	"os"
-	"path/filepath"
-	"slices"
+	"context"
 	"strconv"
-	"strings"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
 	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
@@ -20,14 +14,23 @@ import (
 )
 
 type FinanceHandler struct {
-	config         *viper.Viper
 	log            *zap.SugaredLogger
-	financeService *service.FinanceService
+	financeService FinanceService
 }
 
-func NewFinanceHandler(config *viper.Viper, logger *zap.SugaredLogger, financeService *service.FinanceService) *FinanceHandler {
+type FinanceService interface {
+	Add(ctx context.Context, request *model.AddFinanceRequest) (*model.FinanceResponse, error)
+	Update(ctx context.Context, request *model.UpdateFinanceRequest) (*model.FinanceResponse, error)
+	Delete(ctx context.Context, request *model.DeleteFinanceRequest) (bool, error)
+	FindById(ctx context.Context, request *model.FindByIdFinanceRequest) (*model.FinanceResponse, error)
+	FindAll(ctx context.Context, request *model.FindAllFinanceRequest) ([]model.FinanceResponse, int64, error)
+	Export(ctx context.Context, dapurID uint) ([]model.FinanceResponse, int64, error)
+}
+
+var _ FinanceService = (*service.FinanceService)(nil)
+
+func NewFinanceHandler(logger *zap.SugaredLogger, financeService FinanceService) *FinanceHandler {
 	return &FinanceHandler{
-		config:         config,
 		log:            logger,
 		financeService: financeService,
 	}
@@ -60,45 +63,21 @@ func (h *FinanceHandler) Add(c *fiber.Ctx) error {
 		return exception.InvalidUploadedFileError
 	}
 
-	ext := strings.ToLower(filepath.Ext(proofImg.Filename))
-	allowedExt := []string{".png", ".jpg", ".jpeg"}
-
-	if !slices.Contains(allowedExt, ext) {
-		h.log.Warnf("invalid uploaded file format: %s", ext)
-		return exception.InvalidFileFormatError
-	}
-
-	const maxFileSize = int64(15 * 1024 * 1024)
-	if proofImg.Size > maxFileSize {
-		h.log.Warnf("file size exceeded: %d bytes", proofImg.Size)
-		return exception.ExceedMaximumFileSizeError
-	}
-
-	fileName := uuid.New().String() + ext
-
-	uploadDir := filepath.Join("uploads", "finances-proof")
-
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		h.log.Warnf("failed to create upload directory: %v", err)
-		return exception.InternalServerError
-	}
-
-	filePath := filepath.Join(uploadDir, fileName)
-
-	if err := c.SaveFile(proofImg, filePath); err != nil {
-		h.log.Warnf("failed to save uploaded file: %v", err)
-		return exception.InternalServerError
+	proofImage, filePath, err := saveFinanceProofImage(h.log, c, proofImg)
+	if err != nil {
+		h.log.Warnf("failed to save proof image: %v", err)
+		return err
 	}
 
 	request.ModifiedBy = auth.Fullname
 	request.DapurID = *auth.CurrentDapurID
-	request.ProofImage = "/uploads/finances-proof/" + fileName
+	request.ProofImage = proofImage
 
 	response, err := h.financeService.Add(c.Context(), request)
 	if err != nil {
 		h.log.Warnf("failed to add finance data: %v", err)
-		_ = os.Remove(filePath)
-		return exception.InternalServerError
+		removeSavedFile(h.log, filePath)
+		return err
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(model.Response[*model.FinanceResponse]{
@@ -133,51 +112,15 @@ func (h *FinanceHandler) Update(c *fiber.Ctx) error {
 
 	request.ProofImage = oldData.ProofImage
 
-	proofImg, err := c.FormFile("proof_image")
-	if err == nil {
-		ext := strings.ToLower(filepath.Ext(proofImg.Filename))
-		allowedExt := []string{".png", ".jpg", ".jpeg"}
-
-		if !slices.Contains(allowedExt, ext) {
-			h.log.Warnf("invalid uploaded file format: %s", ext)
-			return exception.InvalidFileFormatError
+	newFilePath := ""
+	if proofImg, err := c.FormFile("proof_image"); err == nil {
+		proofImage, filePath, err := saveFinanceProofImage(h.log, c, proofImg)
+		if err != nil {
+			h.log.Warnf("failed to save proof image: %v", err)
+			return err
 		}
-
-		const maxFileSize = int64(15 * 1024 * 1024)
-		if proofImg.Size > maxFileSize {
-			h.log.Warnf("file size exceeded: %d bytes", proofImg.Size)
-			return exception.ExceedMaximumFileSizeError
-		}
-
-		fileName := uuid.New().String() + ext
-		uploadDir := filepath.Join("uploads", "finances-proof")
-
-		if err := os.MkdirAll(uploadDir, 0755); err != nil {
-			h.log.Warnf("failed to create upload directory: %v", err)
-			return exception.InternalServerError
-		}
-
-		newFilePath := filepath.Join(uploadDir, fileName)
-
-		if err := c.SaveFile(proofImg, newFilePath); err != nil {
-			h.log.Warnf("failed to save uploaded file: %v", err)
-			return exception.InternalServerError
-		}
-
-		if oldData.ProofImage != "" {
-			fileName := filepath.Base(oldData.ProofImage)
-			oldFilePath := filepath.Join("uploads", "finances-proof", fileName)
-
-			if err := os.Remove(oldFilePath); err != nil {
-				if !os.IsNotExist(err) {
-					h.log.Warnf("failed to delete old file: %v", err)
-				} else {
-					h.log.Warnf("file not found, skip delete: %s", oldFilePath)
-				}
-			}
-		}
-
-		request.ProofImage = "/uploads/finances-proof/" + fileName
+		request.ProofImage = proofImage
+		newFilePath = filePath
 	}
 
 	request.ModifiedBy = auth.Fullname
@@ -185,7 +128,11 @@ func (h *FinanceHandler) Update(c *fiber.Ctx) error {
 	response, err := h.financeService.Update(c.Context(), request)
 	if err != nil {
 		h.log.Warnf("failed to update finance data: %v", err)
+		removeSavedFile(h.log, newFilePath)
 		return err
+	}
+	if newFilePath != "" && oldData.ProofImage != request.ProofImage {
+		removeFinanceProofImage(h.log, oldData.ProofImage)
 	}
 
 	return c.JSON(model.Response[*model.FinanceResponse]{
@@ -219,11 +166,18 @@ func (h *FinanceHandler) Delete(c *fiber.Ctx) error {
 	}
 	request.DapurID = *auth.CurrentDapurID
 
+	oldData, err := h.financeService.FindById(c.Context(), &model.FindByIdFinanceRequest{ID: request.ID, DapurID: request.DapurID})
+	if err != nil {
+		h.log.Warnf("failed to get finance data: %v", err)
+		return err
+	}
+
 	response, err := h.financeService.Delete(c.Context(), request)
 	if err != nil {
 		h.log.Warnf("failed to delete finance data: %v", err)
 		return err
 	}
+	removeFinanceProofImage(h.log, oldData.ProofImage)
 
 	return c.JSON(model.Response[bool]{
 		Status:  fiber.StatusOK,
@@ -271,17 +225,10 @@ func (h *FinanceHandler) FindAll(c *fiber.Ctx) error {
 		return err
 	}
 
-	pagingMetadata := &model.PageMetadata{
-		Page:      request.Page,
-		Size:      request.Size,
-		TotalItem: total,
-		TotalPage: int64(math.Ceil(float64(total) / float64(request.Size))),
-	}
-
 	return c.JSON(model.Response[[]model.FinanceResponse]{
 		Status:  fiber.StatusOK,
 		Message: "find all finances data success",
 		Data:    response,
-		Paging:  pagingMetadata,
+		Paging:  newPageMetadata(request.Page, request.Size, total),
 	})
 }

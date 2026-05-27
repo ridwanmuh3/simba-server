@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
 	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
@@ -13,20 +12,18 @@ import (
 )
 
 type DashboardHandler struct {
-	config           *viper.Viper
 	log              *zap.SugaredLogger
-	dashboardService DashboardServiceIface
+	dashboardService DashboardUsecase
 }
 
-type DashboardServiceIface interface {
+type DashboardUsecase interface {
 	GetDashboardStats(ctx context.Context, dapurID uint) (*model.DashboardStatsResponse, error)
 }
 
-var _ DashboardServiceIface = (*service.DashboardService)(nil)
+var _ DashboardUsecase = (*service.DashboardService)(nil)
 
-func NewDashboardHandler(config *viper.Viper, logger *zap.SugaredLogger, dashboardService DashboardServiceIface) *DashboardHandler {
+func NewDashboardHandler(logger *zap.SugaredLogger, dashboardService DashboardUsecase) *DashboardHandler {
 	return &DashboardHandler{
-		config:           config,
 		log:              logger,
 		dashboardService: dashboardService,
 	}

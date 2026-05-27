@@ -10,5 +10,4 @@ var (
 	UserInvalidCredentialsError     = fiber.NewError(fiber.StatusUnauthorized, "invalid username or password")
 	UserCannotSelfDeleteError       = fiber.NewError(fiber.StatusBadRequest, "cannot self delete user")
 	UserDeleteSingleSuperAdminError = fiber.NewError(fiber.StatusForbidden, "cannot delete super admin user if exists only one")
-	UserDeleteActiveUserError       = fiber.NewError(fiber.StatusForbidden, "cannot delete currently active user")
 )

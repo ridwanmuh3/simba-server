@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"fmt"
-	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -22,7 +21,7 @@ type InvoiceHandler struct {
 	log            *zap.SugaredLogger
 	validate       *validator.Validate
 	invoiceService InvoiceService
-	settingService SettingService
+	settingService InvoiceSettingService
 }
 
 type InvoiceService interface {
@@ -36,22 +35,22 @@ type InvoiceService interface {
 	GetInvoiceItemsFlat(ctx context.Context, req *model.GetInvoiceItemsFlatRequest) ([]model.InvoiceItemFlatResponse, int64, error)
 }
 
-type SettingService interface {
+type InvoiceSettingService interface {
 	GetCompanyProfile(ctx context.Context, dapurID uint) (*model.CompanyProfileResponse, error)
 	GetNextDocumentNumbers(ctx context.Context, dapurID uint) (*model.DocumentSequenceResponse, error)
 	ConsumeDocumentNumbers(ctx context.Context, dapurID uint) error
 }
 
 var (
-	_ InvoiceService = (*service.InvoiceService)(nil)
-	_ SettingService = (*service.SettingService)(nil)
+	_ InvoiceService        = (*service.InvoiceService)(nil)
+	_ InvoiceSettingService = (*service.SettingService)(nil)
 )
 
 func NewInvoiceHandler(
 	logger *zap.SugaredLogger,
 	validate *validator.Validate,
 	invoiceService InvoiceService,
-	settingService SettingService,
+	settingService InvoiceSettingService,
 ) *InvoiceHandler {
 	return &InvoiceHandler{
 		log:            logger,
@@ -211,31 +210,11 @@ func (h *InvoiceHandler) GetInvoiceHistory(c *fiber.Ctx) error {
 		return err
 	}
 
-	pageSize := request.Size
-	if pageSize < 1 {
-		pageSize = 10
-	}
-
-	page := request.Page
-	if page < 1 {
-		page = 1
-	}
-
-	totalPage := int64(0)
-	if total > 0 {
-		totalPage = int64(math.Ceil(float64(total) / float64(pageSize)))
-	}
-
 	return c.JSON(model.Response[[]model.InvoiceResponse]{
 		Status:  fiber.StatusOK,
 		Message: "get invoice history success",
 		Data:    response,
-		Paging: &model.PageMetadata{
-			Page:      page,
-			Size:      pageSize,
-			TotalItem: total,
-			TotalPage: totalPage,
-		},
+		Paging:  newPageMetadata(request.Page, request.Size, total),
 	})
 }
 
@@ -363,29 +342,11 @@ func (h *InvoiceHandler) GetInvoiceItemsFlat(c *fiber.Ctx) error {
 		return err
 	}
 
-	pageSize := req.Size
-	if pageSize < 1 {
-		pageSize = 10
-	}
-	page := req.Page
-	if page < 1 {
-		page = 1
-	}
-	totalPage := int64(0)
-	if total > 0 {
-		totalPage = int64(math.Ceil(float64(total) / float64(pageSize)))
-	}
-
 	return c.JSON(model.Response[[]model.InvoiceItemFlatResponse]{
 		Status:  fiber.StatusOK,
 		Message: "get invoice items flat success",
 		Data:    items,
-		Paging: &model.PageMetadata{
-			Page:      page,
-			Size:      pageSize,
-			TotalItem: total,
-			TotalPage: totalPage,
-		},
+		Paging:  newPageMetadata(req.Page, req.Size, total),
 	})
 }
 

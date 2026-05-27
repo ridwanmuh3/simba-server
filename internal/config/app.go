@@ -46,14 +46,14 @@ func Bootstrap(config *BootstrapConfig) {
 	dapurService := service.NewDapurService(config.DB, config.Log, config.Validate, dapurRepository, userRepository)
 
 	// handler
-	userHandler := handler.NewUserHandler(config.Config, config.Log, userService)
-	itemHandler := handler.NewItemHandler(config.Config, config.Log, itemService)
+	userHandler := handler.NewUserHandler(config.Config.GetString("APP_RESET_SECRET"), config.Log, userService)
+	itemHandler := handler.NewItemHandler(config.Log, itemService)
 	stockHandler := handler.NewStockHandler(config.Log, stockService)
 	invoiceHandler := handler.NewInvoiceHandler(config.Log, config.Validate, invoiceService, settingService)
-	financeHandler := handler.NewFinanceHandler(config.Config, config.Log, financeService)
-	dashboardHandler := handler.NewDashboardHandler(config.Config, config.Log, dashboardService)
-	settingHandler := handler.NewSettingHandler(config.Config, config.Log, config.Validate, settingService)
-	dapurHandler := handler.NewDapurHandler(config.Config, config.Log, dapurService)
+	financeHandler := handler.NewFinanceHandler(config.Log, financeService)
+	dashboardHandler := handler.NewDashboardHandler(config.Log, dashboardService)
+	settingHandler := handler.NewSettingHandler(config.Log, settingService)
+	dapurHandler := handler.NewDapurHandler(config.Log, dapurService)
 
 	authMiddleware := middleware.NewAuthMiddleware(config.Log, userService)
 	dapurRequiredMiddleware := middleware.NewDapurRequiredMiddleware(config.Log)

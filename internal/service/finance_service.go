@@ -13,7 +13,6 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/model/converter"
 	"github.com/ridwanmuh3/simba-server/internal/repository"
-	"github.com/ridwanmuh3/simba-server/internal/util"
 )
 
 type FinanceService struct {
@@ -107,12 +106,7 @@ func (s *FinanceService) Update(ctx context.Context, request *model.UpdateFinanc
 	finance.Amount = request.Amount
 	finance.ExtraNote = request.ExtraNote
 	finance.ModifiedBy = request.ModifiedBy
-
-	if finance.ProofImage != request.ProofImage {
-		if err := util.DeleteFile(finance.ProofImage); err != nil {
-			s.log.Errorf("failed to delete proof image file: %v", err)
-			return nil, exception.InternalServerError
-		}
+	if request.ProofImage != "" {
 		finance.ProofImage = request.ProofImage
 	}
 
@@ -142,11 +136,6 @@ func (s *FinanceService) Delete(ctx context.Context, request *model.DeleteFinanc
 	if err != nil {
 		s.log.Errorf("failed to find finance by id: %v", err)
 		return false, exception.FinanceNotFound
-	}
-
-	if err := util.DeleteFile(finance.ProofImage); err != nil {
-		s.log.Errorf("failed to delete proof image file: %v", err)
-		return false, exception.InternalServerError
 	}
 
 	if err := s.financeRepository.Delete(tx, finance); err != nil {

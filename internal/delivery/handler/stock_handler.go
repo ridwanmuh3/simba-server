@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"math"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -153,18 +152,11 @@ func (h *StockHandler) FindAllStocks(c *fiber.Ctx) error {
 		return err
 	}
 
-	pagingMetadata := &model.PageMetadata{
-		Page:      request.Page,
-		Size:      request.Size,
-		TotalItem: total,
-		TotalPage: int64(math.Ceil(float64(total) / float64(request.Size))),
-	}
-
 	return c.JSON(model.Response[[]model.StockResponse]{
 		Status:  fiber.StatusOK,
 		Message: "find all items stocks success",
 		Data:    response,
-		Paging:  pagingMetadata,
+		Paging:  newPageMetadata(request.Page, request.Size, total),
 	})
 }
 
@@ -220,17 +212,10 @@ func (h *StockHandler) GetItemStocksSummary(c *fiber.Ctx) error {
 		return err
 	}
 
-	pagingMetadata := &model.PageMetadata{
-		Page:      request.Page,
-		Size:      request.Size,
-		TotalItem: total,
-		TotalPage: int64(math.Ceil(float64(total) / float64(request.Size))),
-	}
-
 	return c.JSON(model.Response[[]model.ItemStocksSummaryResponse]{
 		Status:  fiber.StatusOK,
 		Message: "get item stock summary success",
 		Data:    response,
-		Paging:  pagingMetadata,
+		Paging:  newPageMetadata(request.Page, request.Size, total),
 	})
 }

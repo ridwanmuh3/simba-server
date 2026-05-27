@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
 	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
@@ -13,7 +12,6 @@ import (
 )
 
 type DapurHandler struct {
-	config       *viper.Viper
 	log          *zap.SugaredLogger
 	dapurService DapurService
 }
@@ -28,9 +26,8 @@ type DapurService interface {
 
 var _ DapurService = (*service.DapurService)(nil)
 
-func NewDapurHandler(config *viper.Viper, log *zap.SugaredLogger, dapurService DapurService) *DapurHandler {
+func NewDapurHandler(log *zap.SugaredLogger, dapurService DapurService) *DapurHandler {
 	return &DapurHandler{
-		config:       config,
 		log:          log,
 		dapurService: dapurService,
 	}
@@ -113,8 +110,6 @@ func (h *DapurHandler) Delete(c *fiber.Ctx) error {
 	})
 }
 
-// SelectDapur handles POST /api/auth/select-dapur.
-// Validates dapur exists and is active, then stores selection server-side.
 func (h *DapurHandler) SelectDapur(c *fiber.Ctx) error {
 	auth := middleware.GetAuthUser(c)
 

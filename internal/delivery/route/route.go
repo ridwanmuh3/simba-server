@@ -126,7 +126,6 @@ func (c *RouteConfig) SetupFinanceRoute() {
 	financeRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"), c.DapurRequiredMiddleware)
 
 	financeRoute.Post("/", c.FinanceHandler.Add)
-	// financeRoute.Post("/import", c.FinanceHandler.ImportItems)
 	financeRoute.Put("/:id", c.FinanceHandler.Update)
 	financeRoute.Delete("/:id", c.FinanceHandler.Delete)
 	financeRoute.Get("/export", c.FinanceHandler.Export)

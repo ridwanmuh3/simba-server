@@ -1,27 +1,32 @@
 package handler
 
 import (
-	"github.com/go-playground/validator/v10"
+	"context"
+
 	"github.com/gofiber/fiber/v2"
+	"go.uber.org/zap"
+
 	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/service"
-	"github.com/spf13/viper"
-	"go.uber.org/zap"
 )
 
 type SettingHandler struct {
-	config         *viper.Viper
 	log            *zap.SugaredLogger
-	validate       *validator.Validate
-	settingService *service.SettingService
+	settingService CompanySettingService
 }
 
-func NewSettingHandler(config *viper.Viper, logger *zap.SugaredLogger, validate *validator.Validate, settingService *service.SettingService) *SettingHandler {
+type CompanySettingService interface {
+	GetCompanyProfile(ctx context.Context, dapurID uint) (*model.CompanyProfileResponse, error)
+	UpdateCompanyProfile(ctx context.Context, request *model.CompanyProfileRequest, dapurID uint) error
+	GetNextDocumentNumbers(ctx context.Context, dapurID uint) (*model.DocumentSequenceResponse, error)
+}
+
+var _ CompanySettingService = (*service.SettingService)(nil)
+
+func NewSettingHandler(logger *zap.SugaredLogger, settingService CompanySettingService) *SettingHandler {
 	return &SettingHandler{
-		config:         config,
 		log:            logger,
-		validate:       validate,
 		settingService: settingService,
 	}
 }

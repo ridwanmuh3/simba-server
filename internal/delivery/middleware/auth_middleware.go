@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"context"
+
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 
@@ -9,7 +11,13 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/service"
 )
 
-func NewAuthMiddleware(logger *zap.SugaredLogger, userService *service.UserService) fiber.Handler {
+type AuthService interface {
+	Verify(ctx context.Context, request *model.VerifyUserRequest) (*model.Auth, error)
+}
+
+var _ AuthService = (*service.UserService)(nil)
+
+func NewAuthMiddleware(logger *zap.SugaredLogger, userService AuthService) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		request := &model.VerifyUserRequest{
 			Token: c.Cookies("token", "NOT_FOUND"),

@@ -86,18 +86,6 @@ func (r *ItemRepository) FindLastStockPrice(db *gorm.DB, itemID string, stockTyp
 	return stock.UnitPrice, err
 }
 
-func (r *ItemRepository) CountByName(db *gorm.DB, name string, dapurID uint) (int64, error) {
-	var count int64
-	err := db.Model(new(entity.Item)).Where("name = ? AND dapur_id = ?", name, dapurID).Count(&count).Error
-	return count, err
-}
-
-func (r *ItemRepository) CountAll(db *gorm.DB) (int64, error) {
-	var count int64
-	err := db.Model(new(entity.Item)).Count(&count).Error
-	return count, err
-}
-
 func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
 		if query.DapurID > 0 {

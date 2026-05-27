@@ -42,8 +42,8 @@ type FindByIdUserRequest struct {
 }
 
 type ResetPasswordRequest struct {
-	Username    string `json:"username"`
-	NewPassword string `json:"new_password"`
+	Username    string `json:"username" validate:"required,alphanum,min=5,max=30"`
+	NewPassword string `json:"new_password" validate:"required,printascii,min=4,max=30"`
 }
 
 type FindAllUserRequest struct {

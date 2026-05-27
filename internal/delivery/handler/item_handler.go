@@ -5,13 +5,11 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
-	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
 	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
@@ -21,7 +19,6 @@ import (
 )
 
 type ItemHandler struct {
-	config      *viper.Viper
 	log         *zap.SugaredLogger
 	itemService ItemService
 }
@@ -39,9 +36,8 @@ type ItemService interface {
 
 var _ ItemService = (*service.ItemService)(nil)
 
-func NewItemHandler(config *viper.Viper, logger *zap.SugaredLogger, itemService ItemService) *ItemHandler {
+func NewItemHandler(logger *zap.SugaredLogger, itemService ItemService) *ItemHandler {
 	return &ItemHandler{
-		config:      config,
 		log:         logger,
 		itemService: itemService,
 	}
@@ -330,17 +326,10 @@ func (h *ItemHandler) FindAll(c *fiber.Ctx) error {
 		return err
 	}
 
-	pagingMetadata := &model.PageMetadata{
-		Page:      request.Page,
-		Size:      request.Size,
-		TotalItem: total,
-		TotalPage: int64(math.Ceil(float64(total) / float64(request.Size))),
-	}
-
 	return c.JSON(model.Response[[]model.ItemResponse]{
 		Status:  fiber.StatusOK,
 		Message: "find all items success",
 		Data:    response,
-		Paging:  pagingMetadata,
+		Paging:  newPageMetadata(request.Page, request.Size, total),
 	})
 }
