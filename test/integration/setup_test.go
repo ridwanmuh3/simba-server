@@ -28,6 +28,8 @@ import (
 
 const (
 	testResetSecret        = "test-reset-secret-xyz"
+	testDapurName          = "Dapur Test Utama"
+	testDapurDescription   = "Dapur default untuk integration test"
 	testSuperAdminUsername = "supertestadmin"
 	testSuperAdminPassword = "supertestpass"
 	testSuperAdminFullname = "Super Test Admin"
@@ -40,6 +42,7 @@ var (
 	testApp           *fiber.App
 	testDB            *gorm.DB
 	testLog           *zap.SugaredLogger
+	testDapurID       uint
 	superAdminCookies []*http.Cookie
 	adminCookies      []*http.Cookie
 )
@@ -52,6 +55,7 @@ func TestMain(m *testing.M) {
 
 	setupApp()
 	truncateTestDB()
+	seedTestDapur()
 	seedTestUsers()
 
 	superAdminCookies = mustLoginUser(testSuperAdminUsername, testSuperAdminPassword)
@@ -91,6 +95,7 @@ func setupApp() {
 	testDB = config.NewDB(v, testLog)
 
 	if err := testDB.AutoMigrate(
+		&entity.Dapur{},
 		&entity.User{},
 		&entity.Item{},
 		&entity.StockTracking{},
@@ -120,8 +125,20 @@ func setupApp() {
 
 func truncateTestDB() {
 	testDB.Exec(
-		"TRUNCATE TABLE users, items, stock_tracks, finances, activity_logs, app_settings, invoices, invoice_items RESTART IDENTITY CASCADE",
+		"TRUNCATE TABLE invoice_items, invoices, stock_tracks, activity_logs, finances, app_settings, items, users, dapurs RESTART IDENTITY CASCADE",
 	)
+}
+
+func seedTestDapur() {
+	dapur := entity.Dapur{
+		Name:        testDapurName,
+		Description: testDapurDescription,
+		IsActive:    true,
+	}
+	if err := testDB.Create(&dapur).Error; err != nil {
+		panic(fmt.Sprintf("seed dapur failed: %v", err))
+	}
+	testDapurID = dapur.ID
 }
 
 func seedTestUsers() {
@@ -136,8 +153,14 @@ func seedTestUsers() {
 		{Username: testAdminUsername, Fullname: testAdminFullname, Role: "Admin", Password: testAdminPassword},
 	} {
 		req := u
-		if _, err := userSvc.Create(ctx, &req); err != nil {
+		created, err := userSvc.Create(ctx, &req)
+		if err != nil {
 			panic(fmt.Sprintf("seed user %s failed: %v", u.Username, err))
+		}
+		if err := testDB.Model(&entity.User{}).
+			Where("id = ?", created.ID).
+			Update("current_dapur_id", testDapurID).Error; err != nil {
+			panic(fmt.Sprintf("assign dapur to user %s failed: %v", u.Username, err))
 		}
 	}
 }
