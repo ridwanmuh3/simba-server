@@ -1,7 +1,6 @@
 package integration_test
 
 import (
-	"fmt"
 	"net/http"
 	"testing"
 )
@@ -13,8 +12,8 @@ func TestLogin(t *testing.T) {
 		password   string
 		wantStatus int
 	}{
-		{"super admin success", testSuperAdminUsername, testSuperAdminPassword, http.StatusOK},
-		{"admin success", testAdminUsername, testAdminPassword, http.StatusOK},
+		{"super admin success", testLoginSuperUsername, testAuthTestPassword, http.StatusOK},
+		{"admin success", testLoginAdminUsername, testAuthTestPassword, http.StatusOK},
 		{"wrong password", testSuperAdminUsername, "wrongpassword", http.StatusUnauthorized},
 		{"nonexistent user", "notexistuser99", "Somepass1!", http.StatusUnauthorized},
 		{"empty username", "", testAdminPassword, http.StatusBadRequest},
@@ -35,7 +34,7 @@ func TestLogin(t *testing.T) {
 }
 
 func TestLoginSetsCookies(t *testing.T) {
-	body := map[string]string{"username": testAdminUsername, "password": testAdminPassword}
+	body := map[string]string{"username": testLoginAdminUsername, "password": testAuthTestPassword}
 	resp := doJSON(http.MethodPost, "/api/auth/login", body, nil)
 
 	if resp.StatusCode != http.StatusOK {
@@ -132,8 +131,8 @@ func TestCurrentUser(t *testing.T) {
 
 func TestLogout(t *testing.T) {
 	t.Run("logout success", func(t *testing.T) {
-		// Login fresh session for this test
-		cookies := mustLoginUser(testAdminUsername, testAdminPassword)
+		// Dedicated account: logging in and out destroys this session on purpose.
+		cookies := mustLoginUser(testLogoutUsername, testAuthTestPassword)
 		resp := doJSON(http.MethodDelete, "/api/auth/logout", nil, cookies)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("logout got %d", resp.StatusCode)
@@ -156,7 +155,8 @@ func TestLogout(t *testing.T) {
 
 func TestRefreshToken(t *testing.T) {
 	t.Run("valid refresh token rotates session", func(t *testing.T) {
-		cookies := mustLoginUser(testAdminUsername, testAdminPassword)
+		// Dedicated account: refresh rotates the stored token for this user.
+		cookies := mustLoginUser(testRefreshUsername, testAuthTestPassword)
 		resp := doJSON(http.MethodPost, "/api/auth/refresh", nil, cookies)
 		if resp.StatusCode != http.StatusOK {
 			r := parseResp(resp)
@@ -254,18 +254,14 @@ func TestRegister(t *testing.T) {
 }
 
 func TestResetPassword(t *testing.T) {
-	// Create a throwaway user to reset
-	throwaway := fmt.Sprintf("throwaway%d", 99)
-	testDB.Exec(
-		"INSERT INTO users (username, fullname, role, password, is_active, created_at, updated_at) VALUES (?, 'Throwaway', 'Admin', 'hash', false, NOW(), NOW())",
-		throwaway,
-	)
-	defer testDB.Exec("DELETE FROM users WHERE username = ?", throwaway)
+	// Dedicated account: resetting a password invalidates that user's session,
+	// and it must not be one the rest of the suite depends on.
+	const newPassword = "Resetpass1!"
 
 	t.Run("success with valid secret", func(t *testing.T) {
 		body := map[string]string{
-			"username":     testSuperAdminUsername,
-			"new_password": "Newpassword99!",
+			"username":     testResetUsername,
+			"new_password": newPassword,
 		}
 		resp := doJSON(http.MethodPost, "/api/auth/reset-password", body, nil, map[string]string{
 			"X-Reset-Secret": testResetSecret,
@@ -274,16 +270,25 @@ func TestResetPassword(t *testing.T) {
 			r := parseResp(resp)
 			t.Fatalf("got %d: %v", resp.StatusCode, r.Error)
 		}
-		// Restore password so subsequent tests that use superAdminCookies keep working
-		body2 := map[string]string{
-			"username":     testSuperAdminUsername,
-			"new_password": testSuperAdminPassword,
+
+		// The new password must actually work, and the old one must not.
+		login := doJSON(http.MethodPost, "/api/auth/login", map[string]string{
+			"username": testResetUsername,
+			"password": newPassword,
+		}, nil)
+		if login.StatusCode != http.StatusOK {
+			parseResp(login)
+			t.Errorf("login with new password got %d, want 200", login.StatusCode)
 		}
-		doJSON(http.MethodPost, "/api/auth/reset-password", body2, nil, map[string]string{
-			"X-Reset-Secret": testResetSecret,
-		})
-		// Re-login super admin
-		superAdminCookies = mustLoginUser(testSuperAdminUsername, testSuperAdminPassword)
+
+		stale := doJSON(http.MethodPost, "/api/auth/login", map[string]string{
+			"username": testResetUsername,
+			"password": testAuthTestPassword,
+		}, nil)
+		if stale.StatusCode != http.StatusUnauthorized {
+			parseResp(stale)
+			t.Errorf("login with old password got %d, want 401", stale.StatusCode)
+		}
 	})
 
 	t.Run("missing secret returns 401", func(t *testing.T) {

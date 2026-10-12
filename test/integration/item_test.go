@@ -36,15 +36,15 @@ func TestAddItem(t *testing.T) {
 		wantStatus int
 	}{
 		{
-			name:    "admin adds item success",
-			cookies: adminCookies,
-			body:    map[string]any{"name": "Beras Premium", "category": "Bahan Pokok", "stock": 100.0, "measure_unit": "Kg", "unit_price": 12000.0},
+			name:       "admin adds item success",
+			cookies:    adminCookies,
+			body:       map[string]any{"name": "Beras Premium", "category": "Bahan Pokok", "stock": 100.0, "measure_unit": "Kg", "unit_price": 12000.0},
 			wantStatus: http.StatusCreated,
 		},
 		{
-			name:    "super admin adds item success",
-			cookies: superAdminCookies,
-			body:    map[string]any{"name": "Gula Merah", "category": "Bahan Pokok", "stock": 50.0, "measure_unit": "Kg", "unit_price": 18000.0},
+			name:       "super admin adds item success",
+			cookies:    superAdminCookies,
+			body:       map[string]any{"name": "Gula Merah", "category": "Bahan Pokok", "stock": 50.0, "measure_unit": "Kg", "unit_price": 18000.0},
 			wantStatus: http.StatusCreated,
 		},
 		{
@@ -277,8 +277,21 @@ func TestUpdateItemStock(t *testing.T) {
 			"unit_price": 7000.0,
 		}
 		resp := doJSON(http.MethodPost, fmt.Sprintf("/api/items/%s/stocks", id), body, adminCookies)
-		if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnprocessableEntity {
-			t.Errorf("got %d, want 400 or 422 for insufficient stock", resp.StatusCode)
+		if resp.StatusCode != http.StatusBadRequest {
+			r := parseResp(resp)
+			t.Fatalf("got %d, want 400 for insufficient stock: %v", resp.StatusCode, r.Error)
+		}
+
+		// A rejected movement must leave the balance untouched.
+		itemResp := doJSON(http.MethodGet, fmt.Sprintf("/api/items/%s", id), nil, adminCookies)
+		if itemResp.StatusCode != http.StatusOK {
+			t.Fatalf("get item got %d", itemResp.StatusCode)
+		}
+		ir := parseResp(itemResp)
+		var item map[string]any
+		_ = json.Unmarshal(ir.Data, &item)
+		if got := item["stock"].(float64); got != 25 {
+			t.Errorf("stock after rejected OUT = %v, want 25", got)
 		}
 	})
 
@@ -343,6 +356,139 @@ func TestUpdateItemStock(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			r := parseResp(resp)
 			t.Errorf("delete stock got %d: %v", resp.StatusCode, r.Error)
+		}
+	})
+}
+
+// TestStockOutBoundary pins the behaviour at the edges of an outbound movement:
+// exactly emptying an item, deducting from an empty item, and the value maths.
+func TestStockOutBoundary(t *testing.T) {
+	id := createTestItem(t, "outboundary") // stock 10 @ 5000 => total_price 50000
+	defer func() {
+		testDB.Exec("DELETE FROM stock_tracks WHERE item_id = ?", id)
+		testDB.Exec("DELETE FROM items WHERE id = ?", id)
+	}()
+
+	readItem := func(t *testing.T) map[string]any {
+		t.Helper()
+		resp := doJSON(http.MethodGet, fmt.Sprintf("/api/items/%s", id), nil, adminCookies)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("get item got %d", resp.StatusCode)
+		}
+		r := parseResp(resp)
+		var data map[string]any
+		_ = json.Unmarshal(r.Data, &data)
+		return data
+	}
+
+	// Numeric fields carry `omitempty`, so a zero value is absent from the wire
+	// rather than serialised as 0.
+	num := func(m map[string]any, key string) float64 {
+		v, ok := m[key].(float64)
+		if !ok {
+			return 0
+		}
+		return v
+	}
+
+	countOutTracks := func(t *testing.T) int {
+		t.Helper()
+		resp := doJSON(http.MethodGet, "/api/items/stocks?type=OUT&page=1&size=100", nil, adminCookies)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("list OUT stocks got %d", resp.StatusCode)
+		}
+		r := parseResp(resp)
+		var rows []struct {
+			Item struct {
+				ID string `json:"id"`
+			} `json:"item"`
+		}
+		_ = json.Unmarshal(r.Data, &rows)
+		n := 0
+		for _, row := range rows {
+			if row.Item.ID == id {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("inbound then exact outbound empties the balance", func(t *testing.T) {
+		// 10 @ 5000 + 20 @ 6000 => balance 30, total_price 170000
+		in := doJSON(http.MethodPost, fmt.Sprintf("/api/items/%s/stocks", id), map[string]any{
+			"type": "IN", "amount": 20.0, "unit_price": 6000.0,
+		}, adminCookies)
+		if in.StatusCode != http.StatusCreated {
+			r := parseResp(in)
+			t.Fatalf("stock IN got %d: %v", in.StatusCode, r.Error)
+		}
+
+		out := doJSON(http.MethodPost, fmt.Sprintf("/api/items/%s/stocks", id), map[string]any{
+			"type": "OUT", "amount": 30.0, "unit_price": 7000.0,
+		}, adminCookies)
+		if out.StatusCode != http.StatusCreated {
+			r := parseResp(out)
+			t.Fatalf("exact OUT got %d: %v", out.StatusCode, r.Error)
+		}
+
+		item := readItem(t)
+		if got := num(item, "stock"); got != 0 {
+			t.Errorf("stock = %v, want 0", got)
+		}
+		if got := num(item, "total_price"); got != 0 {
+			t.Errorf("total_price = %v, want 0", got)
+		}
+	})
+
+	t.Run("outbound against an empty item is rejected", func(t *testing.T) {
+		resp := doJSON(http.MethodPost, fmt.Sprintf("/api/items/%s/stocks", id), map[string]any{
+			"type": "OUT", "amount": 0.5, "unit_price": 7000.0,
+		}, adminCookies)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("got %d, want 400 for outbound on empty stock", resp.StatusCode)
+		}
+
+		r := parseResp(resp)
+		if r.Error != "insufficient stock" {
+			t.Errorf("error = %v, want insufficient stock", r.Error)
+		}
+	})
+
+	t.Run("rejected outbound leaves no ledger row and no balance change", func(t *testing.T) {
+		if n := countOutTracks(t); n != 1 {
+			t.Errorf("OUT tracks = %d, want 1 (the rejected request must not persist)", n)
+		}
+		if got := num(readItem(t), "stock"); got != 0 {
+			t.Errorf("stock = %v, want 0", got)
+		}
+	})
+
+	t.Run("fractional outbound keeps four decimal precision", func(t *testing.T) {
+		other := createTestItem(t, "outboundary-frac")
+		defer func() {
+			testDB.Exec("DELETE FROM stock_tracks WHERE item_id = ?", other)
+			testDB.Exec("DELETE FROM items WHERE id = ?", other)
+		}()
+
+		out := doJSON(http.MethodPost, fmt.Sprintf("/api/items/%s/stocks", other), map[string]any{
+			"type": "OUT", "amount": 3.5, "unit_price": 5000.0,
+		}, adminCookies)
+		if out.StatusCode != http.StatusCreated {
+			r := parseResp(out)
+			t.Fatalf("fractional OUT got %d: %v", out.StatusCode, r.Error)
+		}
+
+		resp := doJSON(http.MethodGet, fmt.Sprintf("/api/items/%s", other), nil, adminCookies)
+		r := parseResp(resp)
+		var item map[string]any
+		_ = json.Unmarshal(r.Data, &item)
+		if got := num(item, "stock"); got != 6.5 {
+			t.Errorf("stock = %v, want 6.5", got)
+		}
+
+		// Deduction uses the moving average (5000), leaving 6.5 * 5000.
+		if got := num(item, "total_price"); got != 32500 {
+			t.Errorf("total_price = %v, want 32500", got)
 		}
 	})
 }

@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ridwanmuh3/simba-server/internal/entity"
 )
 
 func TestInvoiceDownloadUpdateFlatAndDelete(t *testing.T) {
@@ -90,4 +93,55 @@ func TestInvoiceDownloadUpdateFlatAndDelete(t *testing.T) {
 			t.Fatalf("detail after delete status = %d, want 404", resp.StatusCode)
 		}
 	})
+}
+
+// TestInvoiceSchemaCascadesToItems guards the ON DELETE CASCADE that
+// entity.Invoice declares for its line items. Without it, deleting an invoice
+// row while items still reference it fails at the database level, so any
+// caller that does not clear the children first (raw SQL, maintenance scripts,
+// a future repository method) breaks.
+func TestInvoiceSchemaCascadesToItems(t *testing.T) {
+	invoice := entity.Invoice{
+		DapurID:         testDapurID,
+		StockType:       "OUT",
+		CompanyName:     "PT Cascade",
+		CompanyContact:  "0800",
+		CompanyAddress:  "Jl Cascade",
+		InvoiceNumber:   fmt.Sprintf("INV-CASCADE-%d", time.Now().UnixNano()),
+		ReceiverName:    "Client",
+		ReceiverAddress: "Address",
+		InvoiceDate:     "2026-05-27",
+		Penanggungjawab: "PIC",
+		Jabatan:         "Manager",
+	}
+	if err := testDB.Create(&invoice).Error; err != nil {
+		t.Fatalf("create invoice fixture: %v", err)
+	}
+	defer func() {
+		testDB.Exec("DELETE FROM invoice_items WHERE invoice_id = ?", invoice.ID)
+		testDB.Exec("DELETE FROM invoices WHERE id = ?", invoice.ID)
+	}()
+
+	items := []entity.InvoiceItem{
+		{InvoiceID: invoice.ID, ItemName: "Cascade Item A", Amount: 1, UnitPrice: 1000, TotalPrice: 1000},
+		{InvoiceID: invoice.ID, ItemName: "Cascade Item B", Amount: 2, UnitPrice: 1500, TotalPrice: 3000},
+	}
+	if err := testDB.Create(&items).Error; err != nil {
+		t.Fatalf("create invoice items fixture: %v", err)
+	}
+
+	// Delete the parent alone; the children must go with it.
+	if err := testDB.Exec("DELETE FROM invoices WHERE id = ?", invoice.ID).Error; err != nil {
+		t.Fatalf("deleting an invoice with line items failed: %v", err)
+	}
+
+	var remaining int64
+	if err := testDB.Model(&entity.InvoiceItem{}).
+		Where("invoice_id = ?", invoice.ID).
+		Count(&remaining).Error; err != nil {
+		t.Fatalf("count orphaned items: %v", err)
+	}
+	if remaining != 0 {
+		t.Errorf("orphaned invoice items after parent delete = %d, want 0", remaining)
+	}
 }

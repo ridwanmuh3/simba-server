@@ -59,8 +59,8 @@ func (h *StockHandler) UpdateStock(c *fiber.Ctx) error {
 		return err
 	}
 
-	return c.JSON(model.Response[*model.StockResponse]{
-		Status:  fiber.StatusOK,
+	return c.Status(fiber.StatusCreated).JSON(model.Response[*model.StockResponse]{
+		Status:  fiber.StatusCreated,
 		Message: "update stock item success",
 		Data:    response,
 	})

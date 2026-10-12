@@ -123,15 +123,14 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		tr.TotalPrice = addedTotal
 
 	case "OUT":
+		// Reject rather than silently clamping: the caller asked to deduct more
+		// than is on hand, and booking a smaller amount than requested would
+		// report success for a movement that never happened.
+		if request.Amount > previousStock {
+			return nil, exception.InsufficientStockError
+		}
+
 		amount := request.Amount
-
-		if previousStock == 0 {
-			amount = 0
-		}
-
-		if amount > previousStock {
-			amount = previousStock
-		}
 
 		var avg float64
 		if previousStock > 0 {

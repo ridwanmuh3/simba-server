@@ -14,7 +14,7 @@ type StockTracking struct {
 	ModifiedBy    string  `gorm:"size:50;not null"`
 	DapurID       uint    `gorm:"not null;index"`
 	ItemID        string  `gorm:"size:30;not null;index"`
-	Item          Item    `gorm:"foreignKey:ItemID;references:ID;constraint:OnUpdate:CASCADE;OnDelete:CASCADE"`
+	Item          Item    `gorm:"foreignKey:ItemID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (s *StockTracking) TableName() string {

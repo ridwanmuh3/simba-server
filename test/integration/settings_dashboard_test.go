@@ -101,9 +101,10 @@ func TestSettingsRoutes(t *testing.T) {
 }
 
 func TestDashboardRoute(t *testing.T) {
-	suffix := time.Now().UnixNano()
+	// items.id is varchar(30), so the fixture keeps the suffix short.
+	suffix := time.Now().UnixNano() % 1000000
 	item := entity.Item{
-		ID:           fmt.Sprintf("MBG-BHN-DASH-%d", suffix),
+		ID:           fmt.Sprintf("MBG-BHN-D-%d", suffix),
 		Name:         "Dashboard Item",
 		Category:     "Dashboard",
 		InitialStock: 10,

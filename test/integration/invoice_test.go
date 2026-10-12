@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -117,7 +118,7 @@ func TestInvoiceKebutuhanFlow(t *testing.T) {
 	t.Run("history returns kebutuhan", func(t *testing.T) {
 		resp := doJSON(
 			http.MethodGet,
-			fmt.Sprintf("/api/items/invoices?search_query=%s&page=1&size=10", kebutuhan),
+			fmt.Sprintf("/api/items/invoices?search_query=%s&page=1&size=10", url.QueryEscape(kebutuhan)),
 			nil,
 			adminCookies,
 		)

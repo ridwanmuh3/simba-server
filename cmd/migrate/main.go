@@ -5,6 +5,18 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 )
 
+// fksNeedingCascade lists foreign keys that must delete their children along
+// with the parent. See step 7 for why existing databases need the repair.
+var fksNeedingCascade = []struct {
+	table     string
+	column    string
+	refTable  string
+	refColumn string
+}{
+	{table: "invoice_items", column: "invoice_id", refTable: "invoices", refColumn: "id"},
+	{table: "stock_tracks", column: "item_id", refTable: "items", refColumn: "id"},
+}
+
 // tablesNeedingDapur lists tables that require a dapur_id backfill when the
 // column is added to a database that already has rows.
 var tablesNeedingDapur = []string{
@@ -42,6 +54,13 @@ func main() {
 	//    before enforcing NOT NULL. This avoids "column contains null values"
 	//    errors on tables that already have rows.
 	for _, table := range tablesNeedingDapur {
+		// On an empty database the tables do not exist yet — step 5 creates them
+		// with dapur_id already in place, so there is nothing to backfill.
+		if !db.Migrator().HasTable(table) {
+			log.Infof("skipping dapur_id backfill on %s: table does not exist yet", table)
+			continue
+		}
+
 		if !db.Migrator().HasColumn(table, "dapur_id") {
 			log.Infof("adding nullable dapur_id to %s", table)
 			if err := db.Exec("ALTER TABLE " + table + " ADD COLUMN dapur_id bigint").Error; err != nil {
@@ -92,6 +111,39 @@ func main() {
 		if db.Migrator().HasIndex(&entity.Invoice{}, idx) {
 			if err := db.Migrator().DropIndex(&entity.Invoice{}, idx); err != nil {
 				log.Warnf("could not drop index %s: %v", idx, err)
+			}
+		}
+	}
+
+	// 7. Recreate any foreign key that is missing ON DELETE CASCADE. The entity
+	//    tags used to read `constraint:OnUpdate:CASCADE;OnDelete:CASCADE`, but
+	//    GORM splits that tag on `;` and only honours the first option, so the
+	//    schema ended up with `ON UPDATE CASCADE` alone. AutoMigrate does not
+	//    alter an existing constraint, so affected databases keep the broken
+	//    definition — and deleting a parent row fails while children reference
+	//    it — until the constraint is dropped and recreated here.
+	for _, fk := range fksNeedingCascade {
+		var rows []struct{ Conname string }
+		if err := db.Raw(`
+			SELECT conname FROM pg_constraint
+			WHERE contype = 'f'
+			  AND conrelid = ?::regclass
+			  AND confdeltype <> 'c'
+			  AND pg_get_constraintdef(oid) LIKE ?
+		`, fk.table, "%FOREIGN KEY ("+fk.column+")%").Scan(&rows).Error; err != nil {
+			log.Fatalf("failed to inspect foreign keys on %s: %v", fk.table, err)
+		}
+
+		for _, row := range rows {
+			log.Infof("recreating %s on %s with ON DELETE CASCADE", row.Conname, fk.table)
+			if err := db.Exec("ALTER TABLE " + fk.table + " DROP CONSTRAINT " + row.Conname).Error; err != nil {
+				log.Fatalf("failed to drop constraint %s: %v", row.Conname, err)
+			}
+			stmt := "ALTER TABLE " + fk.table + " ADD CONSTRAINT " + row.Conname +
+				" FOREIGN KEY (" + fk.column + ") REFERENCES " + fk.refTable + "(" + fk.refColumn + ")" +
+				" ON UPDATE CASCADE ON DELETE CASCADE"
+			if err := db.Exec(stmt).Error; err != nil {
+				log.Fatalf("failed to recreate constraint %s: %v", row.Conname, err)
 			}
 		}
 	}

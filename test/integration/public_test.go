@@ -1,7 +1,7 @@
 package integration_test
 
 import (
-	"io"
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -18,15 +18,26 @@ func TestPublicRoutes(t *testing.T) {
 		}
 	})
 
-	t.Run("health returns plain ok", func(t *testing.T) {
+	t.Run("health reports status and database probe", func(t *testing.T) {
 		resp := doJSON(http.MethodGet, "/health", nil, nil)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, want 200", resp.StatusCode)
 		}
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if string(body) != "API OK!" {
-			t.Fatalf("body = %q, want API OK!", body)
+
+		r := parseResp(resp)
+		var data map[string]any
+		_ = json.Unmarshal(r.Data, &data)
+
+		if data["status"] != "healthy" {
+			t.Errorf("status = %v, want healthy", data["status"])
+		}
+		if data["db"] != "connected" {
+			t.Errorf("db = %v, want connected", data["db"])
+		}
+		for _, key := range []string{"uptime", "version"} {
+			if v, ok := data[key].(string); !ok || v == "" {
+				t.Errorf("%s missing or empty in health payload: %v", key, data[key])
+			}
 		}
 	})
 }

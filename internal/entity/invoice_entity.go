@@ -23,7 +23,7 @@ type Invoice struct {
 	GrandTotal      float64
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-	Items           []InvoiceItem `gorm:"foreignKey:InvoiceID;references:ID;constraint:OnUpdate:CASCADE;OnDelete:CASCADE"`
+	Items           []InvoiceItem `gorm:"foreignKey:InvoiceID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 // InvoiceItem stores the line items attached to a saved invoice so the PDF can

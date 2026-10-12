@@ -1567,10 +1567,11 @@ paths:
 
         - `IN` adds `amount` to the balance and adds
           `amount x unit_price` to the item total.
-        - `OUT` deduces value at the moving average cost. A request larger
-          than the available balance is clamped to what is on hand, so the
-          stored `amount` can be smaller than the requested one; the balance
-          never goes below zero.
+        - `OUT` deducts value at the moving average cost. A request larger
+          than the available balance is rejected with `400` (`insufficient
+          stock`) instead of being clamped, so a reported success always
+          matches a movement that actually happened; the balance never goes
+          below zero.
         - Omitting `supplier` stores `-`.
 
         Afterwards an activity log is emitted asynchronously and the low-stock
@@ -1602,7 +1603,7 @@ paths:
                   amount: 24.5
                   unit_price: 12500
       responses:
-        "200":
+        "201":
           description: Stock track created.
           content:
             application/json:
@@ -1611,7 +1612,7 @@ paths:
               examples:
                 default:
                   value:
-                    status: 200
+                    status: 201
                     message: update stock item success
                     data:
                       id: 91
@@ -1625,7 +1626,9 @@ paths:
                       modified_by: Ridwan
                       created_at: "2026-10-01T02:05:00Z"
         "400":
-          description: Invalid body, non-positive amount, or unknown stock type.
+          description: |
+            Invalid body, non-positive amount, unknown stock type, or an `OUT`
+            movement larger than the item balance.
           content:
             application/json:
               schema:
@@ -1639,6 +1642,10 @@ paths:
                   value:
                     status: 400
                     error: amount must be greater than 0
+                insufficientStock:
+                  value:
+                    status: 400
+                    error: insufficient stock
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

@@ -36,6 +36,18 @@ const (
 	testAdminUsername      = "admintest01"
 	testAdminPassword      = "Admintest1!"
 	testAdminFullname      = "Admin Test One"
+
+	// Dedicated accounts for tests that log in, refresh, log out, or reset a
+	// password. The API keeps exactly one access token per user, so any of
+	// those actions invalidates every other session for that account — using a
+	// shared account here would silently kill the cookies captured in TestMain
+	// and make the rest of the suite answer 401.
+	testAuthTestPassword   = "Authtest1!"
+	testLoginSuperUsername = "logintestsuper"
+	testLoginAdminUsername = "logintestadmin"
+	testRefreshUsername    = "refreshtestadmin"
+	testLogoutUsername     = "logouttestadmin"
+	testResetUsername      = "resettestuser"
 )
 
 var (
@@ -73,7 +85,9 @@ func setupApp() {
 	os.Setenv("APP_NAME", "simba-test")
 	os.Setenv("APP_PORT", "3099")
 	os.Setenv("APP_PREFORK", "false")
-	os.Setenv("APP_CORS_ALLOWED_ORIGINS", "*")
+	// Fiber refuses to build the CORS middleware when AllowCredentials is true
+	// and AllowOrigins is a wildcard, so the harness must name a real origin.
+	os.Setenv("APP_CORS_ALLOWED_ORIGINS", "http://localhost:3099")
 	os.Setenv("APP_RESET_SECRET", testResetSecret)
 
 	os.Setenv("DB_HOST", getEnvOrDefault("TEST_DB_HOST", "localhost"))
@@ -104,6 +118,7 @@ func setupApp() {
 		&entity.AppSetting{},
 		&entity.Invoice{},
 		&entity.InvoiceItem{},
+		&entity.Notification{},
 	); err != nil {
 		panic(fmt.Sprintf("migration failed: %v", err))
 	}
@@ -128,7 +143,7 @@ func setupApp() {
 
 func truncateTestDB() {
 	testDB.Exec(
-		"TRUNCATE TABLE invoice_items, invoices, stock_tracks, activity_logs, finances, app_settings, items, users, dapurs RESTART IDENTITY CASCADE",
+		"TRUNCATE TABLE invoice_items, invoices, stock_tracks, activity_logs, finances, app_settings, notifications, items, users, dapurs RESTART IDENTITY CASCADE",
 	)
 }
 
@@ -155,6 +170,11 @@ func seedTestUsers() {
 	for _, u := range []model.CreateUserRequest{
 		{Username: testSuperAdminUsername, Fullname: testSuperAdminFullname, Role: "Super Admin", Password: testSuperAdminPassword},
 		{Username: testAdminUsername, Fullname: testAdminFullname, Role: "Admin", Password: testAdminPassword},
+		{Username: testLoginSuperUsername, Fullname: "Login Test Super", Role: "Super Admin", Password: testAuthTestPassword},
+		{Username: testLoginAdminUsername, Fullname: "Login Test Admin", Role: "Admin", Password: testAuthTestPassword},
+		{Username: testRefreshUsername, Fullname: "Refresh Test Admin", Role: "Admin", Password: testAuthTestPassword},
+		{Username: testLogoutUsername, Fullname: "Logout Test Admin", Role: "Admin", Password: testAuthTestPassword},
+		{Username: testResetUsername, Fullname: "Reset Test Admin", Role: "Admin", Password: testAuthTestPassword},
 	} {
 		req := u
 		created, err := userSvc.Create(ctx, &req)

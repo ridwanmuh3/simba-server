@@ -18,26 +18,15 @@ func NewNotificationRepository() *NotificationRepository {
 func (r *NotificationRepository) FindAll(db *gorm.DB, req *model.FindAllNotificationsRequest) ([]entity.Notification, int64, error) {
 	var notifications []entity.Notification
 
-	query := db.Where("dapur_id = ?", req.DapurID)
-
-	if req.UserID > 0 {
-		query = query.Where("user_id = ? OR user_id IS NULL", req.UserID)
-	}
-
-	if req.Type != "" {
-		query = query.Where("type = ?", req.Type)
-	}
-
-	if req.IsRead != nil {
-		query = query.Where("is_read = ?", *req.IsRead)
-	}
-
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := db.Model(new(entity.Notification)).
+		Scopes(r.FilterNotification(req)).
+		Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := query.
+	if err := db.Model(new(entity.Notification)).
+		Scopes(r.FilterNotification(req)).
 		Order("created_at DESC, id DESC").
 		Limit(req.Size).
 		Offset((req.Page - 1) * req.Size).
@@ -46,6 +35,26 @@ func (r *NotificationRepository) FindAll(db *gorm.DB, req *model.FindAllNotifica
 	}
 
 	return notifications, total, nil
+}
+
+func (r *NotificationRepository) FilterNotification(req *model.FindAllNotificationsRequest) func(*gorm.DB) *gorm.DB {
+	return func(tx *gorm.DB) *gorm.DB {
+		tx = tx.Where("dapur_id = ?", req.DapurID)
+
+		if req.UserID > 0 {
+			tx = tx.Where("user_id = ? OR user_id IS NULL", req.UserID)
+		}
+
+		if req.Type != "" {
+			tx = tx.Where("type = ?", req.Type)
+		}
+
+		if req.IsRead != nil {
+			tx = tx.Where("is_read = ?", *req.IsRead)
+		}
+
+		return tx
+	}
 }
 
 func (r *NotificationRepository) CountUnread(db *gorm.DB, dapurID, userID uint) (int64, error) {
