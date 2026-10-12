@@ -1,26 +1,4445 @@
-openapi: 3.0.4
+openapi: 3.2.1
+
 info:
-  title: SIMBA Api Server
-  description: Optional multiline or single-line description in [CommonMark](http://commonmark.org/help/) or HTML.
-  version: 0.1.9
+  title: SIMBA API
+  summary: Backend API for koperasi stock, finance, and invoice management
+  description: |
+    SIMBA (Sistem Informasi Manajemen Anggaran dan Barang) — backend API for
+    SPPG kitchen units (dapur) covering supply stock, finance records, and
+    invoice generation.
+
+    ## Base URL
+
+    All JSON endpoints live under the `/api` prefix. Static uploads are served
+    from `/uploads` and the realtime socket from `/ws` — both are **outside**
+    the `/api` prefix.
+
+    ## Authentication
+
+    Login issues two HttpOnly cookies:
+
+    | Cookie          | Path         | Lifetime | Purpose                                   |
+    |-----------------|--------------|----------|-------------------------------------------|
+    | `token`         | `/`          | 30 min   | Access token, read by every protected API |
+    | `refresh_token` | `/api/auth`  | 7 days   | One-time-use refresh token                |
+
+    `POST /api/auth/refresh` rotates **both** tokens; presenting a refresh
+    token that has already been rotated fails and forces a re-login.
+
+    Cookies are `SameSite=Strict` on HTTPS and `SameSite=Lax` on plain HTTP.
+    Access tokens are also hashed at rest, so a session cannot be replayed from
+    a leaked database row.
+
+    ## CSRF
+
+    `POST`, `PUT`, `PATCH`, and `DELETE` require the `X-Csrf-Token` header to
+    match the `csrf_` cookie (double-submit, constant-time comparison). Fetch
+    the pair from `GET /api/auth/csrf` first; the cookie is set on every
+    response and the header is echoed in the response body as `csrf_token`.
+    A missing or mismatching header yields `403 invalid csrf token`.
+
+    ## Roles and tenancy
+
+    Two roles exist: `Admin` and `Super Admin`.
+
+    - `Super Admin` — user administration, dapur administration, everything an
+      `Admin` can do.
+    - `Admin` — dapur-scoped stock, finance, invoice, dashboard, and settings.
+
+    Every dapur-scoped response is filtered by the caller's active
+    `current_dapur_id`. Call `POST /api/auth/select-dapur` before touching
+    those endpoints; without it the API answers `403 dapur not selected`.
+
+    ## Pagination
+
+    List endpoints accept `page` (default `1`, min `1`) and `size`
+    (default `10`, min `1`, **max `100`**) and answer with a `paging` object
+    next to `data`.
+
+    ## Response envelope
+
+    Every response body — success or error — is a JSON object with `status`,
+    an optional `message`, and either `data` (plus `paging`) or `error`, where
+    `error` carries a single message or an array of validation messages.
+    Request validation failures arrive as `400` with those messages, never
+    with an internal error string.
+
+    ## Uploads and limits
+
+    | Endpoint                  | Field        | Accepted types    | Max size |
+    |---------------------------|--------------|-------------------|----------|
+    | `POST /api/items/import`  | `import_file`| `.csv`            | 10 MB, 500 data rows |
+    | `POST /api/finances`      | `proof_image`| `.png` `.jpg` `.jpeg` | 15 MB |
+    | `PUT /api/finances/{id}`  | `proof_image`| `.png` `.jpg` `.jpeg` | 15 MB |
+
+    Request bodies are capped at 15 MB overall. Uploaded proofs are stored
+    under `uploads/finances-proof/` and referenced by `proof_image` as
+    `/uploads/finances-proof/<uuid>.<ext>`.
+
+    ## Rate limiting
+
+    `POST /api/auth/login` allows 5 attempts per minute per
+    `IP + normalized username`; the 6th answers `429` with `Retry-After`.
+    A successful login clears one recorded attempt.
+  version: 1.0.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  contact:
+    name: SIMBA
 
 servers:
-  - url: https://simbambg.my.id/api
-    description: Optional server description, e.g. Main (production) server
+  - url: https://simbambg.my.id
+    description: Production
+  - url: https://api.simbambg.my.id
+    description: Production (API host)
   - url: http://localhost:3000
-    description: Optional server description, e.g. Internal staging server for testing
+    description: Local development
+
+security:
+  - cookieAuth: []
+
+tags:
+  - name: Public
+    summary: Public
+    description: >
+      Liveness and health endpoints. No authentication required.
+    kind: nav
+  - name: Authentication
+    summary: Authentication
+    description: >-
+      Login, logout, session refresh, token rotation, active-dapur selection,
+      and the secret-gated bootstrap endpoints.
+    kind: nav
+  - name: Management
+    summary: Management
+    description: Cross-cutting administrative surfaces.
+    kind: nav
+  - name: Users
+    summary: Users
+    description: User administration. Requires the `Super Admin` role.
+    parent: Management
+    kind: nav
+  - name: Dapurs
+    summary: Dapurs
+    description: >-
+      Kitchen/tenant administration. Reading requires any authenticated role;
+      writing requires `Super Admin`.
+    parent: Management
+    kind: nav
+  - name: Operations
+    summary: Operations
+    description: Day-to-day dapur workloads for Admin and Super Admin.
+    kind: nav
+  - name: Items
+    summary: Items
+    description: >-
+      Master item catalogue and CSV bulk import/export. Item IDs follow the
+      `MBG-BHN-NNNN` pattern and are generated server-side.
+    parent: Operations
+    kind: nav
+  - name: Stock
+    summary: Stock
+    description: >-
+      Stock movements. Balances and unit prices are derived with a moving
+      average cost (MAC) recalculation over the full stock-track chain.
+    parent: Operations
+    kind: nav
+  - name: Invoices
+    summary: Invoices
+    description: >-
+      Invoice generation from stock tracks, stored invoice history, detail
+      editing, and PDF rendering.
+    parent: Operations
+    kind: nav
+  - name: Finances
+    summary: Finances
+    description: Income and expense records with a mandatory proof image.
+    parent: Operations
+    kind: nav
+  - name: Dashboard
+    summary: Dashboard
+    description: Aggregated stock, budget, and recent-activity statistics.
+    parent: Operations
+    kind: nav
+  - name: Settings
+    summary: Settings
+    description: Per-dapur company profile and the next invoice/PO sequence numbers.
+    parent: Operations
+    kind: nav
+  - name: Uploads
+    summary: Uploads
+    description: >-
+      Static delivery of stored proof images. Requires an authenticated
+      `Admin` or `Super Admin` session.
+    parent: Operations
+    kind: nav
+  - name: Realtime
+    summary: Realtime
+    description: Live push channel and persistent notification inbox.
+    kind: nav
+  - name: Notifications
+    summary: Notifications
+    description: >-
+      Persistent inbox for dapur alerts. Notifications are currently produced
+      by the low-stock checker when an item's stock drops to or below its
+      threshold.
+    parent: Realtime
+    kind: nav
+  - name: WebSocket
+    summary: WebSocket
+    description: WebSocket upgrade for realtime activity and low-stock events.
+    parent: Realtime
+    kind: nav
 
 paths:
-  /users:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Public
+  # ───────────────────────────────────────────────────────────────────────────
+  /:
     get:
-      summary: Returns a list of users.
-      description: Optional extended description in CommonMark or HTML.
+      operationId: getWelcome
+      tags: [Public]
+      summary: Welcome message
+      description: Returns a static banner. Useful to confirm the process is up.
+      security: []
       responses:
-        "200": # status code
-          description: A JSON array of user names
+        "200":
+          $ref: "#/components/responses/MessageOk"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Public]
+      summary: Health check
+      description: >-
+        Reports process liveness plus a database connectivity probe. Always
+        answers `200`; read `data.status` for `healthy` / `unhealthy`.
+      security: []
+      responses:
+        "200":
+          description: Liveness, database state, uptime, and API version.
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/HealthEnvelope"
+              examples:
+                healthy:
+                  summary: Database reachable
+                  value:
+                    status: 200
+                    message: API is running
+                    data:
+                      status: healthy
+                      db: connected
+                      uptime: 3h12m8s
+                      version: 1.0.0
+                unhealthy:
+                  summary: Database unreachable
+                  value:
+                    status: 200
+                    message: API is running
+                    data:
+                      status: unhealthy
+                      db: disconnected
+                      uptime: 12s
+                      version: 1.0.0
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Authentication
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/auth/csrf:
+    get:
+      operationId: getCsrfToken
+      tags: [Authentication]
+      summary: Issue a CSRF token
+      description: >-
+        Reads the `csrf_` cookie, generating one when absent, and returns the
+        token to be sent back as `X-Csrf-Token` on every mutating request.
+        Safe to call repeatedly.
+      security: []
+      responses:
+        "200":
+          description: CSRF token, also set as the `csrf_` cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsrfEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: csrf token success
+                    data:
+                      csrf_token: 7dGZ0mQ1sJQ9Kx2vV1e5yR8nL3pA6cT4uB0wZ2hF9dM
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/auth/login:
+    post:
+      operationId: login
+      tags: [Authentication]
+      summary: Log in
+      description: |
+        Authenticates by username and password, then sets the `token` and
+        `refresh_token` cookies. Tokens are returned hashed at rest and are
+        **not** included in the JSON body.
+
+        Rate limited to 5 attempts per minute per `IP + normalized username`.
+      security:
+        - csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              default:
+                value:
+                  username: adminspgg
+                  password: Rahasia#2026
+                  remember_me: false
+      responses:
+        "200":
+          description: Session established; both auth cookies are set.
+          headers:
+            Set-Cookie:
+              description: >-
+                `token` (path `/`, 30 min) and `refresh_token` (path
+                `/api/auth`, 7 days), both HttpOnly.
               schema:
                 type: array
                 items:
                   type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: user login success
+                    data:
+                      id: 1
+                      fullname: Ridwan
+                      role: Super Admin
+                      current_dapur_id: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/auth/refresh:
+    post:
+      operationId: refreshSession
+      tags: [Authentication]
+      summary: Refresh the session
+      description: >-
+        Rotates the access and refresh tokens using the `refresh_token` cookie
+        (one-time use). Cookies are cleared when the presented token is
+        unknown, expired, or already rotated, and the response is `401`.
+      security:
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/RefreshTokenCookie"
+      responses:
+        "200":
+          description: New token pair; both auth cookies are re-set.
+          headers:
+            Set-Cookie:
+              description: Rotated `token` and `refresh_token` cookies.
+              schema:
+                type: array
+                items:
+                  type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/auth/logout:
+    delete:
+      operationId: logout
+      tags: [Authentication]
+      summary: Log out
+      description: >-
+        Clears the stored token hashes and invalidates both cookies, so any
+        previously issued access or refresh token is dead immediately.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      responses:
+        "200":
+          description: Session invalidated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: user logout success
+                    data: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/auth/_current:
+    get:
+      operationId: getCurrentAuthUser
+      tags: [Authentication]
+      summary: Current session
+      description: >-
+        Returns the authenticated user together with the active dapur, without
+        the token cookies. Handy for bootstrapping the client shell.
+      responses:
+        "200":
+          description: Authenticated identity and active dapur.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get current auth user success
+                    data:
+                      id: 1
+                      fullname: Ridwan
+                      role: Super Admin
+                      current_dapur_id: 1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/auth/heartbeat:
+    patch:
+      operationId: heartbeat
+      tags: [Authentication]
+      summary: Heartbeat
+      description: >-
+        Refreshes `last_active` for the authenticated user. Used by the web
+        client to keep the online indicator truthful.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/auth/reset-password:
+    post:
+      operationId: resetPassword
+      tags: [Authentication]
+      summary: Reset a password
+      description: |
+        Operator escape hatch for locked-out accounts. Disabled unless
+        `APP_RESET_SECRET` is configured on the server; when enabled the caller
+        must present that value in `X-Reset-Secret`.
+
+        The new password must satisfy the strong-password policy and every
+        existing session for the user is invalidated.
+      security:
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/ResetSecretHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password replaced and user sessions invalidated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: password reset success, user session invalidated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/auth/register:
+    post:
+      operationId: registerUser
+      tags: [Authentication]
+      summary: Register a user (secret-gated)
+      description: >-
+        Creates a user without an authenticated session. Disabled unless
+        `APP_RESET_SECRET` is configured, and gated by the `X-Reset-Secret`
+        header. Prefer `POST /api/users` for routine administration.
+      security:
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/ResetSecretHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/auth/select-dapur:
+    post:
+      operationId: selectDapur
+      tags: [Authentication]
+      summary: Select the active dapur
+      description: >-
+        Binds the authenticated user to a dapur. The dapur must exist and be
+        active. Required before calling any dapur-scoped endpoint.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dapur_id]
+              properties:
+                dapur_id:
+                  type: integer
+                  format: int64
+                  minimum: 1
+            examples:
+              default:
+                value:
+                  dapur_id: 1
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageOk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >-
+            `invalid csrf token`, `dapur is not active`, or the caller has no
+            active session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                inactive:
+                  value:
+                    status: 403
+                    error: dapur is not active
+        "404":
+          description: Dapur or user not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                dapurNotFound:
+                  value:
+                    status: 404
+                    error: dapur not found
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Users
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/users:
+    get:
+      operationId: listUsers
+      tags: [Users]
+      summary: List users
+      description: Paginated user list, optionally filtered by full name.
+      responses:
+        "200":
+          description: Page of users with pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: find all users success
+                    data:
+                      - id: 1
+                        username: admin.sppg
+                        fullname: Ridwan
+                        role: Super Admin
+                        is_active: true
+                        last_active: "2026-10-12T08:31:02Z"
+                        created_at: "2026-04-18T02:10:00Z"
+                    paging:
+                      page: 1
+                      size: 10
+                      total_item: 1
+                      total_page: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+      parameters:
+        - name: fullname
+          in: query
+          required: false
+          description: Case-insensitive partial match on full name.
+          schema:
+            type: string
+            maxLength: 30
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+
+    post:
+      operationId: createUser
+      tags: [Users]
+      summary: Create a user
+      description: >-
+        Creates a user. `role` accepts exactly `Admin` or `Super Admin`;
+        `password` must satisfy the strong-password policy.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+            examples:
+              default:
+                value:
+                  username: dapurutara
+                  fullname: Dapur Utara
+                  role: Admin
+                  password: Rahasia#2026
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 201
+                    message: create user success
+                    data:
+                      id: 7
+                      username: dapurutara
+                      fullname: Dapur Utara
+                      role: Admin
+                      is_active: false
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/users/stats:
+    get:
+      operationId: getUserStats
+      tags: [Users]
+      summary: User statistics
+      description: Totals per role plus the number of users seen as active.
+      responses:
+        "200":
+          description: Aggregate counters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserStatsEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get users statistics success
+                    data:
+                      users_total: 12
+                      users_super_admin_total: 2
+                      users_admin_total: 10
+                      users_active_total: 4
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/users/{id}:
+    get:
+      operationId: getUserById
+      tags: [Users]
+      summary: Get a user
+      parameters:
+        - $ref: "#/components/parameters/UserIdParam"
+      responses:
+        "200":
+          description: User detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      operationId: updateUser
+      tags: [Users]
+      summary: Update a user
+      description: >-
+        Updates the full name and, when supplied, replaces the password. Both
+        fields are optional; send only what changes.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/UserIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+            examples:
+              default:
+                value:
+                  fullname: Dapur Utara Rev
+                  old_password: Rahasia#2026
+      responses:
+        "200":
+          description: User updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteUser
+      tags: [Users]
+      summary: Delete a user
+      description: >-
+        Soft deletes a user. A user cannot delete their own account, and the
+        last remaining `Super Admin` cannot be deleted.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/UserIdParam"
+      responses:
+        "200":
+          description: User deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+        "400":
+          description: Invalid id, or the caller tried to delete their own account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                selfDelete:
+                  value:
+                    status: 400
+                    error: cannot self delete user
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >-
+            Caller is not a Super Admin, or the target is the only remaining
+            Super Admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                lastSuperAdmin:
+                  value:
+                    status: 403
+                    error: cannot delete super admin user if exists only one
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Dapurs
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/dapurs:
+    get:
+      operationId: listDapurs
+      tags: [Dapurs]
+      summary: List dapurs
+      description: All dapurs, active and inactive. Any authenticated role may read.
+      responses:
+        "200":
+          description: Dapur list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DapurListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: list dapurs success
+                    data:
+                      - id: 1
+                        name: SPPG Dewa Makmur
+                        description: Dapur utama
+                        is_active: true
+                        created_at: "2026-04-18T02:10:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      operationId: createDapur
+      tags: [Dapurs]
+      summary: Create a dapur
+      description: Creates an active dapur. Names are unique.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDapurRequest"
+            examples:
+              default:
+                value:
+                  name: SPPG Utara
+                  description: Unit produksi wilayah utara
+      responses:
+        "201":
+          description: Dapur created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DapurEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: A dapur with that name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                duplicate:
+                  value:
+                    status: 409
+                    error: dapur with that name already exists
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/dapurs/{id}:
+    put:
+      operationId: updateDapur
+      tags: [Dapurs]
+      summary: Update a dapur
+      description: >-
+        Partial update. Omitted fields are left untouched; send `is_active`
+        to deactivate a dapur, which blocks new `select-dapur` calls for it.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Dapur identifier.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDapurRequest"
+            examples:
+              default:
+                value:
+                  name: SPPG Utara Rev
+                  is_active: true
+      responses:
+        "200":
+          description: Dapur updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DapurEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteDapur
+      tags: [Dapurs]
+      summary: Delete a dapur
+      description: Hard deletes the dapur record.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Dapur identifier.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageOk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Items
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/items:
+    get:
+      operationId: listItems
+      tags: [Items]
+      summary: List items
+      description: Paginated item catalogue scoped to the active dapur.
+      parameters:
+        - name: search_query
+          in: query
+          required: false
+          description: >-
+            Case-insensitive partial match on item id, name, or category.
+          schema:
+            type: string
+            maxLength: 30
+        - name: start_date
+          in: query
+          required: false
+          description: Lower bound on `created_at`, inclusive.
+          schema:
+            type: string
+        - name: end_date
+          in: query
+          required: false
+          description: Upper bound on `created_at`, inclusive.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Page of items with pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: find all items success
+                    data:
+                      - id: MBG-BHN-0001
+                        name: Beras
+                        category: Bahan Pokok
+                        stock: 25.5
+                        initial_stock: 50
+                        measure_unit: kg
+                        unit_price: 12500
+                        total_price: 318750
+                        created_at: "2026-04-18T02:10:00Z"
+                    paging:
+                      page: 1
+                      size: 10
+                      total_item: 1
+                      total_page: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      operationId: createItem
+      tags: [Items]
+      summary: Create an item
+      description: >-
+        Creates a master item. The `MBG-BHN-NNNN` id is generated under a
+        PostgreSQL advisory lock, and `initial_stock` is seeded from `stock`.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddItemRequest"
+            examples:
+              default:
+                value:
+                  name: Beras
+                  category: Bahan Pokok
+                  stock: 50
+                  measure_unit: kg
+                  unit_price: 12500
+                  date_added: "2026-10-01T02:00:00Z"
+      responses:
+        "201":
+          description: Item created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 201
+                    message: add new item success
+                    data:
+                      id: MBG-BHN-0001
+                      name: Beras
+                      category: Bahan Pokok
+                      stock: 50
+                      initial_stock: 50
+                      measure_unit: kg
+                      unit_price: 12500
+                      total_price: 625000
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/import:
+    post:
+      operationId: importItems
+      tags: [Items]
+      summary: Import items from CSV
+      description: |
+        Bulk-creates items from a CSV upload and returns the number of rows
+        inserted. Accepted column order:
+
+        `nama, kategori, stok, satuan, harga`
+
+        A `sep=,` directive line and a header row (`nama` / `tanggal input`)
+        are ignored. The file must have the `.csv` extension, stay at or below
+        10 MB, and contain at most 500 data rows.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [import_file]
+              properties:
+                import_file:
+                  type: string
+                  format: binary
+                  description: CSV file to import.
+      responses:
+        "201":
+          description: Rows imported.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CountEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 201
+                    message: items imported successfully
+                    data: 128
+        "400":
+          description: >-
+            Missing upload, malformed CSV, empty file, non-numeric stock or
+            price, or more than 500 rows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                rowLimit:
+                  value:
+                    status: 400
+                    error: Jumlah baris melebihi batas maksimum 500 baris
+                badRow:
+                  value:
+                    status: 400
+                    error: "Baris 12: Format stok salah (harus angka)"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          description: Unsupported extension or oversized file.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                notCsv:
+                  value:
+                    status: 422
+                    error: only accept csv format
+                tooLarge:
+                  value:
+                    status: 422
+                    error: system only accept uploaded file size below 10MB
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/export:
+    get:
+      operationId: exportItems
+      tags: [Items]
+      summary: Export items
+      description: >-
+        Returns every item of the active dapur as JSON, newest first. The
+        response is not paginated, so the client does the file conversion.
+      responses:
+        "200":
+          description: Full item list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemListEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/categories:
+    get:
+      operationId: listItemCategories
+      tags: [Items]
+      summary: List item categories
+      description: Distinct, alphabetically sorted categories used in the active dapur.
+      responses:
+        "200":
+          description: Category names.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StringListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get item categories success
+                    data: [Bahan Pokok, Sayuran, Protein]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/stocks:
+    get:
+      operationId: listStocks
+      tags: [Stock]
+      summary: List stock tracks
+      description: >-
+        Paginated stock movements across every item of the active dapur,
+        newest first. `type` accepts `IN`, `OUT`, or `ALL` (the default).
+      parameters:
+        - name: type
+          in: query
+          required: false
+          description: Filter by movement direction. Defaults to `ALL`.
+          schema:
+            type: string
+            enum: [IN, OUT, ALL]
+        - name: category
+          in: query
+          required: false
+          description: Restrict to a single item category.
+          schema:
+            type: string
+            maxLength: 50
+        - name: search_query
+          in: query
+          required: false
+          description: >-
+            Case-insensitive partial match on item id, item name, category, or
+            supplier.
+          schema:
+            type: string
+            maxLength: 30
+        - name: start_date
+          in: query
+          required: false
+          description: Lower bound on the movement timestamp, inclusive.
+          schema:
+            type: string
+        - name: end_date
+          in: query
+          required: false
+          description: Upper bound on the movement timestamp, inclusive.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Page of stock tracks with pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: find all items stocks success
+                    data:
+                      - id: 91
+                        type: IN
+                        amount: 50
+                        previous_stock: 0
+                        new_stock: 50
+                        unit_price: 12500
+                        total_price: 625000
+                        supplier: CV Pangan Sejahtera
+                        modified_by: Ridwan
+                        created_at: "2026-10-01T02:05:00Z"
+                        item:
+                          id: MBG-BHN-0001
+                          name: Beras
+                          category: Bahan Pokok
+                          stock: 50
+                          initial_stock: 50
+                          measure_unit: kg
+                          unit_price: 12500
+                          total_price: 625000
+                    paging:
+                      page: 1
+                      size: 10
+                      total_item: 1
+                      total_page: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/stocks/summary:
+    get:
+      operationId: getStocksFinanceSummary
+      tags: [Stock]
+      summary: Stock finance summary
+      description: >-
+        Budget roll-up for the active dapur: the value of the master item
+        catalogue, the money moved in and out through stock tracks, and the
+        resulting current budget.
+      responses:
+        "200":
+          description: Finance summary figures.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StocksFinanceSummaryEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get stocks finance summary success
+                    data:
+                      master_items_total_budget: 12500000
+                      budget_in: 6250000
+                      budget_out: 1875000
+                      profit: 4375000
+                      current_budget: 16912500
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/stocks/opname:
+    get:
+      operationId: getStockOpname
+      tags: [Stock]
+      summary: Stock opname summary
+      description: >-
+        Per-item recap of inbound and outbound quantities inside a date range,
+        with the current physical stock, buy/sell price, and stock value.
+      parameters:
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: search_query
+          in: query
+          required: false
+          description: >-
+            Case-insensitive partial match on item id, name, or category.
+          schema:
+            type: string
+            maxLength: 30
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Page of per-item summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemStockSummaryListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get item stock summary success
+                    data:
+                      - item_id: MBG-BHN-0001
+                        name: Beras
+                        category: Bahan Pokok
+                        initial_stock: 50
+                        measure_unit: kg
+                        total_in: 50
+                        total_out: 24.5
+                        current_stock: 25.5
+                        buy_price: 12500
+                        sell_price: 12500
+                        stock_value: 318750
+                    paging:
+                      page: 1
+                      size: 10
+                      total_item: 1
+                      total_page: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/{id}:
+    get:
+      operationId: getItemById
+      tags: [Items]
+      summary: Get an item
+      parameters:
+        - $ref: "#/components/parameters/ItemIdParam"
+      responses:
+        "200":
+          description: Item detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      operationId: updateItem
+      tags: [Items]
+      summary: Update an item
+      description: >-
+        Partial update. Stock and unit price are recomputed by replaying the
+        moving-average-cost chain, so `stock` in the body is not written
+        verbatim — it is the MAC result that is stored.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/ItemIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateItemRequest"
+            examples:
+              default:
+                value:
+                  name: Beras Premium
+                  category: Bahan Pokok
+                  measure_unit: kg
+                  unit_price: 13000
+      responses:
+        "200":
+          description: Item updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteItem
+      tags: [Items]
+      summary: Delete an item
+      description: >-
+        Deletes the item and every stock track attached to it, including soft
+        deleted rows, and writes an activity log entry.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/ItemIdParam"
+      responses:
+        "200":
+          description: Item and its stock tracks deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/{id}/stocks:
+    post:
+      operationId: createStockTrack
+      tags: [Stock]
+      summary: Record a stock movement
+      description: |
+        Appends an `IN` or `OUT` stock track and updates the item balance.
+
+        - `IN` adds `amount` to the balance and adds
+          `amount x unit_price` to the item total.
+        - `OUT` deduces value at the moving average cost. A request larger
+          than the available balance is clamped to what is on hand, so the
+          stored `amount` can be smaller than the requested one; the balance
+          never goes below zero.
+        - Omitting `supplier` stores `-`.
+
+        Afterwards an activity log is emitted asynchronously and the low-stock
+        checker runs; an alert is produced when the item has a threshold
+        greater than zero and the new stock is at or below it.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/ItemIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStockRequest"
+            examples:
+              stockIn:
+                summary: Inbound
+                value:
+                  type: IN
+                  amount: 50
+                  unit_price: 12500
+                  supplier: CV Pangan Sejahtera
+              stockOut:
+                summary: Outbound
+                value:
+                  type: OUT
+                  amount: 24.5
+                  unit_price: 12500
+      responses:
+        "200":
+          description: Stock track created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: update stock item success
+                    data:
+                      id: 91
+                      type: IN
+                      amount: 50
+                      previous_stock: 0
+                      new_stock: 50
+                      unit_price: 12500
+                      total_price: 625000
+                      supplier: CV Pangan Sejahtera
+                      modified_by: Ridwan
+                      created_at: "2026-10-01T02:05:00Z"
+        "400":
+          description: Invalid body, non-positive amount, or unknown stock type.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                badType:
+                  value:
+                    status: 400
+                    error: invalid stock type
+                badAmount:
+                  value:
+                    status: 400
+                    error: amount must be greater than 0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/{id}/stocks/{stock_id}:
+    patch:
+      operationId: updateStockTrack
+      tags: [Stock]
+      summary: Edit a stock movement
+      description: >-
+        Rewrites amount, unit price, and supplier of a single stock track and
+        replays the MAC chain for the item, so every following track gets
+        corrected balances and totals too.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/ItemIdParam"
+        - $ref: "#/components/parameters/StockIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditStockRequest"
+            examples:
+              default:
+                value:
+                  amount: 48
+                  unit_price: 12750
+                  supplier: CV Pangan Sejahtera
+      responses:
+        "200":
+          description: Stock track updated and MAC chain rebuilt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteStockTrack
+      tags: [Stock]
+      summary: Delete a stock movement
+      description: >-
+        Removes a stock track and replays the MAC chain so the item balance
+        and totals stay consistent.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/ItemIdParam"
+        - $ref: "#/components/parameters/StockIdParam"
+      responses:
+        "200":
+          description: Stock track deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/{id}/stocks/last-price:
+    get:
+      operationId: getLastStockPrice
+      tags: [Stock]
+      summary: Last unit price
+      description: >-
+        Most recent unit price recorded for an item in the given direction,
+        used to pre-fill the stock form.
+      parameters:
+        - $ref: "#/components/parameters/ItemIdParam"
+        - name: type
+          in: query
+          required: false
+          description: Movement direction to look up. Defaults to `IN`.
+          schema:
+            type: string
+            enum: [IN, OUT]
+      responses:
+        "200":
+          description: Last recorded unit price.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NumberEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get last stock price success
+                    data: 12500
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Invoices
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/items/invoices:
+    post:
+      operationId: generateInvoice
+      tags: [Invoices]
+      summary: Generate an invoice
+      description: |
+        Builds an invoice from the stock tracks matching `date_from` /
+        `date_to` (or the explicit `stock_ids`), persists the invoice and its
+        frozen line items, advances the document sequence, and streams the
+        rendered PDF back.
+
+        Blank fields are filled server-side: `company_name`,
+        `company_address`, and `company_contact` fall back to the saved company
+        profile, `invoice_no` and `po_no` fall back to the next document
+        numbers, `stock_type` defaults to `OUT`, and `bank_account` defaults to
+        the configured account.
+
+        Because the response is a PDF, an empty selection is reported as `404`
+        rather than an empty document.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateInvoiceRequest"
+            examples:
+              default:
+                value:
+                  invoice_no: INV-014
+                  date: "2026-10-12"
+                  po_no: PO-009
+                  kebutuhan: Belanja harian
+                  date_from: "2026-10-01"
+                  date_to: "2026-10-12"
+                  stock_type: OUT
+                  receiver_name: Dapur Utara
+                  receiver_address: Jl. Melati No. 2
+                  penanggungjawab: Ridwan
+                  jabatan: Kepala SPPG
+      responses:
+        "200":
+          description: Rendered invoice PDF.
+          headers:
+            Content-Disposition:
+              description: >-
+                Attachment named `INVOICE-BARANG KELUAR-<invoice_no>.pdf` (or
+                `MASUK` for inbound invoices). Exposed to the browser.
+              schema:
+                type: string
+            Access-Control-Expose-Headers:
+              description: Always `Content-Disposition`.
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid body, or a failed validation of the filled-in invoice fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid:
+                  value:
+                    status: 400
+                    error: validation failed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No stock tracks matched the requested range and direction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                empty:
+                  value:
+                    status: 404
+                    error: tidak ada data bahan KELUAR pada rentang tanggal yang dipilih
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    get:
+      operationId: listInvoices
+      tags: [Invoices]
+      summary: List invoices
+      description: Paginated invoice history for the active dapur, newest first.
+      parameters:
+        - name: search_query
+          in: query
+          required: false
+          description: >-
+            Case-insensitive partial match on invoice number, PO number,
+            company name, company contact, or kebutuhan.
+          schema:
+            type: string
+            maxLength: 100
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Page of invoices with pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get invoice history success
+                    data:
+                      - id: 14
+                        stock_type: OUT
+                        company_name: Koperasi Konsumen Dewa Makmur Multi Sejahtera
+                        company_contact: "08123456789"
+                        company_address: Jl. Melati No. 1
+                        invoice_number: INV-014
+                        po_number: PO-009
+                        kebutuhan: Belanja harian
+                        receiver_name: Dapur Utara
+                        receiver_address: Jl. Melati No. 2
+                        invoice_date: "12 Oktober 2026"
+                        keterangan: ""
+                        penanggungjawab: Ridwan
+                        jabatan: Kepala SPPG
+                        bank_account: BNI 2048441550 A.N Koperasi Konsumen Dewa Makmur Multi Sejahtera
+                        has_items: true
+                        created_at: "2026-10-12T03:00:00Z"
+                        updated_at: "2026-10-12T03:00:00Z"
+                    paging:
+                      page: 1
+                      size: 10
+                      total_item: 1
+                      total_page: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/invoices/items-flat:
+    get:
+      operationId: listInvoiceItemsFlat
+      tags: [Invoices]
+      summary: Flat invoice line items
+      description: >-
+        Cross-invoice view of every stored line item, one row per line, with
+        buy and sell pricing. Useful for reconciliation and reporting exports.
+      parameters:
+        - name: search_query
+          in: query
+          required: false
+          description: Case-insensitive partial match on the line's item name.
+          schema:
+            type: string
+            maxLength: 100
+        - name: start_date
+          in: query
+          required: false
+          description: >-
+            Lower bound on the line timestamp. Must be an RFC 3339 timestamp;
+            an unparsable value is ignored rather than rejected.
+          schema:
+            type: string
+            format: date-time
+        - name: end_date
+          in: query
+          required: false
+          description: >-
+            Upper bound on the line timestamp. Must be an RFC 3339 timestamp;
+            an unparsable value is ignored rather than rejected.
+          schema:
+            type: string
+            format: date-time
+        - name: stock_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [IN, OUT]
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Page of flattened line items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceItemFlatListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get invoice items flat success
+                    data:
+                      - date: "2026-10-12"
+                        invoice_number: INV-014
+                        item_name: Beras
+                        measure_unit: kg
+                        amount: 24.5
+                        stock_type: OUT
+                        buy_price: 12500
+                        sell_price: 12500
+                        total_buy_price: 306250
+                        total_sell_price: 306250
+                    paging:
+                      page: 1
+                      size: 10
+                      total_item: 1
+                      total_page: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/invoices/{id}:
+    get:
+      operationId: getInvoiceDetail
+      tags: [Invoices]
+      summary: Get an invoice
+      description: >-
+        Invoice header plus the frozen line items and grand total that were
+        captured when the invoice was generated.
+      parameters:
+        - $ref: "#/components/parameters/InvoiceIdParam"
+      responses:
+        "200":
+          description: Invoice with line items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceDetailEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get invoice detail success
+                    data:
+                      id: 14
+                      stock_type: OUT
+                      company_name: Koperasi Konsumen Dewa Makmur Multi Sejahtera
+                      company_contact: "08123456789"
+                      company_address: Jl. Melati No. 1
+                      invoice_number: INV-014
+                      po_number: PO-009
+                      kebutuhan: Belanja harian
+                      receiver_name: Dapur Utara
+                      receiver_address: Jl. Melati No. 2
+                      invoice_date: "12 Oktober 2026"
+                      keterangan: ""
+                      penanggungjawab: Ridwan
+                      jabatan: Kepala SPPG
+                      bank_account: BNI 2048441550 A.N Koperasi Konsumen Dewa Makmur Multi Sejahtera
+                      has_items: true
+                      created_at: "2026-10-12T03:00:00Z"
+                      updated_at: "2026-10-12T03:00:00Z"
+                      items:
+                        - id: 31
+                          item_name: Beras
+                          category: Bahan Pokok
+                          measure_unit: kg
+                          amount: 24.5
+                          unit_price: 12500
+                          total_price: 306250
+                          supplier: "-"
+                          stock_type: OUT
+                      grand_total: 306250
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    patch:
+      operationId: updateInvoice
+      tags: [Invoices]
+      summary: Update an invoice
+      description: >-
+        Updates the stored invoice header and replaces its line items with the
+        stock tracks listed in `stock_ids`. Company name, address, and contact
+        are required.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/InvoiceIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateInvoiceRequest"
+            examples:
+              default:
+                value:
+                  company_name: Koperasi Konsumen Dewa Makmur Multi Sejahtera
+                  company_address: Jl. Melati No. 1
+                  company_contact: "08123456789"
+                  invoice_date: "2026-10-12"
+                  keterangan: Revisi jumlah
+                  stock_ids: [91, 92]
+      responses:
+        "200":
+          description: Invoice updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteInvoice
+      tags: [Invoices]
+      summary: Delete an invoice
+      description: Removes the invoice together with its line items.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/InvoiceIdParam"
+      responses:
+        "200":
+          description: Invoice deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/items/invoices/{id}/pdf:
+    get:
+      operationId: downloadInvoicePdf
+      tags: [Invoices]
+      summary: Download an invoice PDF
+      description: >-
+        Re-renders the PDF from the stored invoice snapshot. Invoices saved
+        before line items were persisted have nothing to render and answer
+        `422`.
+      parameters:
+        - $ref: "#/components/parameters/InvoiceIdParam"
+        - name: mode
+          in: query
+          required: false
+          description: >-
+            `view` renders inline in the browser; any other value (or omission)
+            downloads the file.
+          schema:
+            type: string
+            enum: [view, download]
+      responses:
+        "200":
+          description: Rendered invoice PDF.
+          headers:
+            Content-Disposition:
+              description: >-
+                `inline` when `mode=view`, otherwise `attachment`, named
+                `INVOICE-BARANG <KELUAR|MASUK>-<invoice_no>.pdf`.
+              schema:
+                type: string
+            Access-Control-Expose-Headers:
+              description: Always `Content-Disposition`.
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invoice id is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                badId:
+                  value:
+                    status: 400
+                    error: invalid invoice id
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: The invoice has no stored line items and cannot be re-rendered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                noItems:
+                  value:
+                    status: 422
+                    error: invoice tidak memiliki rincian bahan; tidak dapat diunduh ulang
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Finances
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/finances:
+    get:
+      operationId: listFinances
+      tags: [Finances]
+      summary: List finance records
+      description: Paginated income and expense records for the active dapur.
+      parameters:
+        - name: search_query
+          in: query
+          required: false
+          description: >-
+            Case-insensitive partial match on category, description, extra
+            note, or type.
+          schema:
+            type: string
+            maxLength: 30
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+      responses:
+        "200":
+          description: Page of finance records with pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: find all finances data success
+                    data:
+                      - id: 42
+                        type: PENGELUARAN
+                        category: Bahan Pokok
+                        description: Pembelian beras
+                        amount: 625000
+                        extra_note: Lunas
+                        proof_image: /uploads/finances-proof/8f1c....jpg
+                        modified_by: Ridwan
+                        created_at: "2026-10-01T02:05:00Z"
+                    paging:
+                      page: 1
+                      size: 10
+                      total_item: 1
+                      total_page: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      operationId: createFinance
+      tags: [Finances]
+      summary: Create a finance record
+      description: >-
+        Creates an income or expense record. Sent as `multipart/form-data`
+        because the proof image is mandatory.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/AddFinanceForm"
+            encoding:
+              proof_image:
+                contentType: image/png, image/jpeg
+      responses:
+        "201":
+          description: Finance record created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 201
+                    message: add finance data success
+                    data:
+                      id: 42
+                      type: PENGELUARAN
+                      category: Bahan Pokok
+                      description: Pembelian beras
+                      amount: 625000
+                      extra_note: Lunas
+                      proof_image: /uploads/finances-proof/8f1c....jpg
+                      modified_by: Ridwan
+                      created_at: "2026-10-01T02:05:00Z"
+        "400":
+          description: >-
+            Missing or non-integer `amount`, invalid file format, or a failed
+            field validation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                badAmount:
+                  value:
+                    status: 400
+                    error: amount must be a valid integer
+                missingFile:
+                  value:
+                    status: 400
+                    error: invalid uploaded file
+                badFormat:
+                  value:
+                    status: 400
+                    error: invalid file format
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          description: Proof image exceeds the maximum upload size.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                tooLarge:
+                  value:
+                    status: 422
+                    error: system only accept uploaded file size below 10MB
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/finances/export:
+    get:
+      operationId: exportFinances
+      tags: [Finances]
+      summary: Export finance records
+      description: >-
+        Returns every finance record of the active dapur as JSON, newest first.
+        Not paginated; the client converts it to a file.
+      responses:
+        "200":
+          description: Full finance list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceListEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/finances/{id}:
+    get:
+      operationId: getFinanceById
+      tags: [Finances]
+      summary: Get a finance record
+      parameters:
+        - $ref: "#/components/parameters/FinanceIdParam"
+      responses:
+        "200":
+          description: Finance detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      operationId: updateFinance
+      tags: [Finances]
+      summary: Update a finance record
+      description: >-
+        Updates the record. Keep the existing proof image by omitting
+        `proof_image`; uploading a new one replaces the file and deletes the
+        previous upload.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/FinanceIdParam"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UpdateFinanceForm"
+            encoding:
+              proof_image:
+                contentType: image/png, image/jpeg
+      responses:
+        "200":
+          description: Finance record updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteFinance
+      tags: [Finances]
+      summary: Delete a finance record
+      description: Deletes the record and removes its proof image from disk.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/FinanceIdParam"
+      responses:
+        "200":
+          description: Finance record deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Dashboard
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/dashboard:
+    get:
+      operationId: getDashboardStats
+      tags: [Dashboard]
+      summary: Dashboard statistics
+      description: >-
+        Single aggregated read for the home screen: item and stock movement
+        totals, finance budget totals, a 12-point monthly series, expense
+        composition, and the most recent activity log entries.
+      responses:
+        "200":
+          description: Aggregated dashboard payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get dashboard stats success
+                    data:
+                      total_items: 128
+                      stock_in: 512.5
+                      stock_out: 300.25
+                      total_budget: 12500000
+                      budget_in: 6250000
+                      budget_out: 1875000
+                      monthly_budget:
+                        - month: "2026-09"
+                          in: 3250000
+                          out: 900000
+                        - month: "2026-10"
+                          in: 3000000
+                          out: 975000
+                      expense_composition:
+                        - category: Bahan Pokok
+                          amount: 1200000
+                        - category: Protein
+                          amount: 675000
+                      system_activities:
+                        - id: 512
+                          type: UPDATE-STOCK
+                          title: Stok bahan diperbarui
+                          description: "Beras: 50.00 → 25.50 kg"
+                          created_at: "2026-10-01T02:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Settings
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/settings/company:
+    get:
+      operationId: getCompanyProfile
+      tags: [Settings]
+      summary: Get the company profile
+      description: >-
+        Company identity used to pre-fill invoices. `bank_account` falls back
+        to the built-in default when never configured.
+      responses:
+        "200":
+          description: Company profile for the active dapur.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyProfileEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get company profile success
+                    data:
+                      company_name: Koperasi Konsumen Dewa Makmur Multi Sejahtera
+                      company_address: Jl. Melati No. 1
+                      company_contact: "08123456789"
+                      bank_account: BNI 2048441550 A.N Koperasi Konsumen Dewa Makmur Multi Sejahtera
+                      penanggungjawab: Ridwan
+                      jabatan: Kepala SPPG
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      operationId: updateCompanyProfile
+      tags: [Settings]
+      summary: Update the company profile
+      description: Replaces the stored profile for the active dapur.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyProfileRequest"
+            examples:
+              default:
+                value:
+                  company_name: Koperasi Konsumen Dewa Makmur Multi Sejahtera
+                  company_address: Jl. Melati No. 1
+                  company_contact: "08123456789"
+                  bank_account: BNI 2048441550 A.N Koperasi Konsumen Dewa Makmur Multi Sejahtera
+                  penanggungjawab: Ridwan
+                  jabatan: Kepala SPPG
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageOk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/settings/next-document-number:
+    get:
+      operationId: getNextDocumentNumbers
+      tags: [Settings]
+      summary: Next document numbers
+      description: >-
+        Derives the next `INV-NNN` and `PO-NNN` sequence values from the
+        highest numbers already present in the dapur's invoice history, so the
+        suggestion never goes backwards.
+      responses:
+        "200":
+          description: Suggested next invoice and PO numbers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSequenceEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get next document numbers success
+                    data:
+                      next_invoice_no: INV-014
+                      next_po_no: PO-009
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Notifications
+  # ───────────────────────────────────────────────────────────────────────────
+  /api/notifications:
+    get:
+      operationId: listNotifications
+      tags: [Notifications]
+      summary: List notifications
+      description: >-
+        Inbox for the active dapur, newest first. Includes both broadcasts
+        (`user_id` null) and notifications targeted at the caller.
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/SizeParam"
+        - name: is_read
+          in: query
+          required: false
+          description: >-
+            Filter by read state. `true` or `1` selects read, `false` selects
+            unread, and omitting the parameter returns both.
+          schema:
+            type: string
+            enum: ["true", "false", "1", "0"]
+        - name: type
+          in: query
+          required: false
+          description: Notification type, for example `LOW_STOCK`.
+          schema:
+            type: string
+            maxLength: 30
+      responses:
+        "200":
+          description: Page of notifications with pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationListEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get notifications success
+                    data:
+                      - id: 87
+                        type: LOW_STOCK
+                        title: Stok Beras rendah
+                        message: "Stok Beras tinggal 2.50 kg (threshold: 5.00)"
+                        level: warning
+                        is_read: false
+                        meta_json: '{"item_id":"MBG-BHN-0001","current_stock":2.5000,"threshold":5.0000}'
+                        created_at: "2026-10-12T04:15:00Z"
+                    paging:
+                      page: 1
+                      size: 10
+                      total_item: 1
+                      total_page: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/notifications/unread-count:
+    get:
+      operationId: getUnreadNotificationCount
+      tags: [Notifications]
+      summary: Unread notification count
+      description: Badge count of unread notifications visible to the caller.
+      responses:
+        "200":
+          description: Unread counter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnreadCountEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: get unread count success
+                    data:
+                      count: 3
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/notifications/read-all:
+    patch:
+      operationId: markAllNotificationsRead
+      tags: [Notifications]
+      summary: Mark all as read
+      description: Marks every unread notification visible to the caller as read.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      responses:
+        "200":
+          description: All notifications marked as read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+              examples:
+                default:
+                  value:
+                    status: 200
+                    message: all notifications marked as read
+                    data: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/notifications/{id}/read:
+    patch:
+      operationId: markNotificationRead
+      tags: [Notifications]
+      summary: Mark one as read
+      description: >-
+        Marks a single notification as read. Notifications addressed to another
+        user are not visible and are left untouched.
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/NotificationIdParam"
+      responses:
+        "200":
+          description: Notification marked as read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+        "400":
+          description: Notification id is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                badId:
+                  value:
+                    status: 400
+                    error: invalid notification id
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/notifications/{id}:
+    delete:
+      operationId: deleteNotification
+      tags: [Notifications]
+      summary: Delete a notification
+      security:
+        - cookieAuth: []
+        - csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/NotificationIdParam"
+      responses:
+        "200":
+          description: Notification deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoolEnvelope"
+        "400":
+          description: Notification id is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                badId:
+                  value:
+                    status: 400
+                    error: invalid notification id
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Uploads
+  # ───────────────────────────────────────────────────────────────────────────
+  /uploads/{filepath}:
+    get:
+      operationId: getUploadedFile
+      tags: [Uploads]
+      summary: Serve an uploaded file
+      description: >-
+        Static delivery of stored files, currently the finance proof images
+        referenced by `proof_image`. Interactive browsing is disabled and the
+        browser cache is valid for 24 hours.
+      parameters:
+        - name: filepath
+          in: path
+          required: true
+          description: Path below `/uploads`, for example `finances-proof/<uuid>.jpg`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File contents.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # WebSocket
+  # ───────────────────────────────────────────────────────────────────────────
+  /ws:
+    get:
+      operationId: connectWebSocket
+      tags: [WebSocket]
+      summary: Open the realtime socket
+      description: |
+        Upgrades the connection to WebSocket. The socket is bound        to the authenticated session: the `token` cookie must be valid **and**
+        `current_dapur_id` must already be selected, otherwise the upgrade is
+        rejected with `401` or `403`. Messages sent by the client are ignored.
+
+        Server frames are JSON `EventPayload` objects. Known events:
+
+        | `type`     | `data`                            | Emitted when |
+        |------------|-----------------------------------|--------------|
+        | `ACTIVITY` | `ActivityLog`                     | An audit trail entry is written (item or stock change) |
+        | `LOW_STOCK`| `{item_id, item_name, current_stock, threshold, measure_unit}` | An item's stock falls to or below its threshold |
+
+        The server pings every 54 seconds and drops the connection when no
+        pong arrives within 60 seconds. Outbound frames are capped at 512 bytes.
+      responses:
+        "101":
+          description: >-
+            Switching protocols. The connection becomes a WebSocket carrying
+            the JSON frames described by the `WsEvent` schema.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WsEvent"
+        "400":
+          description: The request was not a valid WebSocket upgrade.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            No valid session. The access-token cookie is checked before the
+            upgrade, and the socket is closed when the identity cannot be
+            resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                middleware:
+                  value:
+                    status: 401
+                    error: user unauthorized
+                noSession:
+                  value:
+                    status: 401
+                    error: authentication required
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+      description: >-
+        HttpOnly access-token cookie set by `POST /api/auth/login`. Valid for
+        30 minutes; renew it with `POST /api/auth/refresh`.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-Csrf-Token
+      description: >-
+        Double-submit CSRF token. Must equal the `csrf_` cookie value on every
+        `POST`, `PUT`, `PATCH`, and `DELETE` request.
+
+  headers:
+    RequestId:
+      description: >-
+        Correlation id of the request, echoed back and written to every log
+        line for it. Send `X-Request-ID` to choose your own value; a UUID is
+        generated otherwise.
+      schema:
+        type: string
+
+  parameters:
+    ResetSecretHeader:
+      name: X-Reset-Secret
+      in: header
+      required: true
+      description: >-
+        Must equal the server's `APP_RESET_SECRET` value. When the server has
+        no secret configured the endpoint refuses every call with `401`.
+      schema:
+        type: string
+    RefreshTokenCookie:
+      name: refresh_token
+      in: cookie
+      required: true
+      description: One-time-use refresh token issued at login.
+      schema:
+        type: string
+    PageParam:
+      name: page
+      in: query
+      required: false
+      description: 1-based page number.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    SizeParam:
+      name: size
+      in: query
+      required: false
+      description: Page size.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+    UserIdParam:
+      name: id
+      in: path
+      required: true
+      description: User identifier.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    ItemIdParam:
+      name: id
+      in: path
+      required: true
+      description: >-
+        Item identifier, for example `MBG-BHN-0001`. Fixed segments
+        (`import`, `export`, `categories`, `stocks`, `invoices`) are matched
+        before the id segment, so they are reserved and cannot be item ids.
+      schema:
+        type: string
+        pattern: ^MBG-BHN-[0-9]+$
+    StockIdParam:
+      name: stock_id
+      in: path
+      required: true
+      description: Stock track identifier.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    InvoiceIdParam:
+      name: id
+      in: path
+      required: true
+      description: Invoice identifier.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    FinanceIdParam:
+      name: id
+      in: path
+      required: true
+      description: Finance record identifier.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    NotificationIdParam:
+      name: id
+      in: path
+      required: true
+      description: Notification identifier.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+  responses:
+    MessageOk:
+      description: Operation completed and the body only carries a status and message.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageEnvelope"
+    BadRequest:
+      description: >-
+        Body, params, or query failed validation. The `error` member is an
+        array of field-level validation messages.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            validation:
+              value:
+                status: 400
+                error:
+                  - "Key: 'CreateUserRequest.Username' Error:Field validation for 'Username' failed on the 'min' tag"
+    Unauthorized:
+      description: Missing, invalid, or expired session.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            unauthorized:
+              value:
+                status: 401
+                error: user unauthorized
+    InvalidCredentials:
+      description: The username/password pair did not match an account.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            invalid:
+              value:
+                status: 401
+                error: invalid username or password
+    Forbidden:
+      description: >-
+        Request rejected before the handler ran: role mismatch
+        (`user forbidden`), missing dapur selection (`dapur not selected`), or
+        CSRF validation failure (`invalid csrf token`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            role:
+              value:
+                status: 403
+                error: user forbidden
+            dapur:
+              value:
+                status: 403
+                error: dapur not selected
+            csrf:
+              value:
+                status: 403
+                error: invalid csrf token
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+    NotFound:
+      description: The requested record does not exist, or is outside the active dapur.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            notFound:
+              value:
+                status: 404
+                error: item not found
+    Conflict:
+      description: A record with the same unique key already exists.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            duplicateUser:
+              value:
+                status: 409
+                error: user already exists
+    PayloadTooLarge:
+      description: The request body exceeded the 15 MB server limit.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            tooLarge:
+              value:
+                status: 413
+                error: Request Entity Too Large
+    TooManyRequests:
+      description: Login rate limit exceeded.
+      headers:
+        Retry-After:
+          description: Seconds until the current window expires.
+          schema:
+            type: string
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            limited:
+              value:
+                status: 429
+                error: too many login attempts
+    InternalServerError:
+      description: >-
+        Unexpected server failure. The client sees a generic message; the
+        detail is only written to the server log.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            internal:
+              value:
+                status: 500
+                error: internal server error
+
+  schemas:
+    # ── Envelope ────────────────────────────────────────────────────────────
+    Envelope:
+      type: object
+      title: Response envelope
+      description: >-
+        Wrapper every endpoint answers with. `data` and `paging` accompany
+        success, `error` accompanies failure.
+      required: [status]
+      properties:
+        status:
+          type: integer
+          description: HTTP status code mirrored in the body.
+        message:
+          type: string
+          description: Human-readable outcome, omitted when empty.
+        data:
+          description: Endpoint-specific payload, omitted when empty.
+        paging:
+          $ref: "#/components/schemas/Paging"
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+
+    ErrorResponse:
+      type: object
+      title: Error envelope
+      description: Body shape used for every non-2xx response.
+      required: [status]
+      properties:
+        status:
+          type: integer
+          description: HTTP status code mirrored in the body.
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+
+    ErrorDetail:
+      description: >-
+        A single message for handler errors, or an array of field validation
+        messages when the request failed validation.
+      oneOf:
+        - type: string
+        - type: array
+          items:
+            type: string
+
+    Paging:
+      type: object
+      description: Pagination metadata attached to list responses.
+      required: [page, size, total_item, total_page]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: 1-based page number that was served.
+        size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Page size that was applied.
+        total_item:
+          type: integer
+          format: int64
+          description: Total number of matching rows.
+        total_page:
+          type: integer
+          format: int64
+          description: Total number of pages, `0` when there is no data.
+
+    # ── Typed envelopes ─────────────────────────────────────────────────────
+    MessageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: "null"
+
+    BoolEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: boolean
+
+    CountEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: integer
+              description: Number of rows affected.
+
+    NumberEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: number
+
+    StringListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                type: string
+
+    CsrfEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CsrfToken"
+
+    HealthEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/HealthStatus"
+
+    AuthEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Auth"
+
+    UserEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/User"
+
+    UserListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/User"
+
+    UserStatsEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UserStats"
+
+    DapurEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Dapur"
+
+    DapurListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Dapur"
+
+    ItemEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Item"
+
+    ItemListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Item"
+
+    StockEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Stock"
+
+    StockListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Stock"
+
+    ItemStockSummaryListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/ItemStockSummary"
+
+    StocksFinanceSummaryEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/StocksFinanceSummary"
+
+    InvoiceListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Invoice"
+
+    InvoiceDetailEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/InvoiceDetail"
+
+    InvoiceItemFlatListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/InvoiceItemFlat"
+
+    FinanceEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Finance"
+
+    FinanceListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Finance"
+
+    DashboardEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DashboardStats"
+
+    CompanyProfileEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CompanyProfile"
+
+    DocumentSequenceEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DocumentSequence"
+
+    NotificationListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Notification"
+
+    UnreadCountEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UnreadCount"
+
+    # ── Domain models ───────────────────────────────────────────────────────
+    CsrfToken:
+      type: object
+      properties:
+        csrf_token:
+          type: string
+          description: Base64url-encoded 32-byte token, also stored in the `csrf_` cookie.
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        db:
+          type: string
+          description: Database probe result.
+          enum: [connected, disconnected, not configured]
+        uptime:
+          type: string
+          description: Process uptime, rounded to the second, for example `3h12m8s`.
+        version:
+          type: string
+
+    Auth:
+      type: object
+      description: >-
+        Authenticated identity. Access and refresh tokens travel only in
+        HttpOnly cookies and never appear here.
+      properties:
+        id:
+          type: integer
+        fullname:
+          type: string
+        role:
+          type: string
+          enum: [Admin, Super Admin]
+        current_dapur_id:
+          type: [integer, "null"]
+          description: Active dapur, `null` until `select-dapur` is called.
+
+    User:
+      type: object
+      description: Fields with zero values are omitted from the response.
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        fullname:
+          type: string
+        role:
+          type: string
+          enum: [Admin, Super Admin]
+        is_active:
+          type: boolean
+          description: True while the user holds a live session.
+        last_active:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    UserStats:
+      type: object
+      properties:
+        users_total:
+          type: integer
+          format: int64
+        users_super_admin_total:
+          type: integer
+          format: int64
+        users_admin_total:
+          type: integer
+          format: int64
+        users_active_total:
+          type: integer
+          format: int64
+
+    Dapur:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    Item:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: ^MBG-BHN-[0-9]+$
+          description: Server-generated item code.
+        name:
+          type: string
+        category:
+          type: string
+        stock:
+          type: number
+          description: Current balance, rounded to 4 decimals.
+        initial_stock:
+          type: number
+        measure_unit:
+          type: string
+        unit_price:
+          type: number
+          description: Current moving average cost per unit.
+        total_price:
+          type: number
+          description: Value of the remaining balance, rounded to 2 decimals.
+        created_at:
+          type: string
+          format: date-time
+
+    Stock:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [IN, OUT]
+        amount:
+          type: number
+          description: Recorded movement. For `OUT`, clamped to the available balance.
+        previous_stock:
+          type: number
+        new_stock:
+          type: number
+        unit_price:
+          type: number
+        total_price:
+          type: number
+          description: Value of this movement, rounded to 2 decimals.
+        supplier:
+          type: string
+          description: Supplier name, or `-` when not provided.
+        modified_by:
+          type: string
+          description: Full name of the acting user.
+        created_at:
+          type: string
+          format: date-time
+        item:
+          $ref: "#/components/schemas/Item"
+
+    ItemStockSummary:
+      type: object
+      properties:
+        item_id:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        initial_stock:
+          type: number
+        measure_unit:
+          type: string
+        total_in:
+          type: number
+        total_out:
+          type: number
+        current_stock:
+          type: number
+        buy_price:
+          type: number
+        sell_price:
+          type: number
+        stock_value:
+          type: number
+
+    StocksFinanceSummary:
+      type: object
+      properties:
+        master_items_total_budget:
+          type: number
+        budget_in:
+          type: number
+        budget_out:
+          type: number
+        profit:
+          type: number
+        current_budget:
+          type: number
+
+    Invoice:
+      type: object
+      description: Stored invoice header. Line items live in `InvoiceDetail`.
+      properties:
+        id:
+          type: integer
+        stock_type:
+          type: string
+          enum: [IN, OUT]
+          description: Stock direction the invoice was generated from.
+        company_name:
+          type: string
+        company_contact:
+          type: string
+        company_address:
+          type: string
+        invoice_number:
+          type: string
+        po_number:
+          type: string
+        kebutuhan:
+          type: string
+        receiver_name:
+          type: string
+        receiver_address:
+          type: string
+        invoice_date:
+          type: string
+          description: Free-text date, as printed on the invoice.
+        keterangan:
+          type: string
+        penanggungjawab:
+          type: string
+        jabatan:
+          type: string
+        bank_account:
+          type: string
+        has_items:
+          type: boolean
+          description: True when line items were stored and the PDF can be re-rendered.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    InvoiceItem:
+      type: object
+      description: Frozen line item captured when the invoice was generated.
+      properties:
+        id:
+          type: integer
+        item_name:
+          type: string
+        category:
+          type: string
+        measure_unit:
+          type: string
+        amount:
+          type: number
+        unit_price:
+          type: number
+        total_price:
+          type: number
+        supplier:
+          type: string
+        stock_type:
+          type: string
+          enum: [IN, OUT]
+
+    InvoiceDetail:
+      allOf:
+        - $ref: "#/components/schemas/Invoice"
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/InvoiceItem"
+            grand_total:
+              type: number
+
+    InvoiceItemFlat:
+      type: object
+      description: One stored invoice line, flattened across invoices.
+      properties:
+        date:
+          type: string
+        invoice_number:
+          type: string
+        item_name:
+          type: string
+        measure_unit:
+          type: string
+        amount:
+          type: number
+        stock_type:
+          type: string
+          enum: [IN, OUT]
+        buy_price:
+          type: number
+        sell_price:
+          type: number
+        total_buy_price:
+          type: number
+        total_sell_price:
+          type: number
+
+    Finance:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [PEMASUKAN, PENGELUARAN]
+          description: Income or expense.
+        category:
+          type: string
+        description:
+          type: string
+        amount:
+          type: integer
+          description: Whole rupiah, no decimals.
+        extra_note:
+          type: string
+        proof_image:
+          type: string
+          description: Public path to the uploaded proof, under `/uploads`.
+        modified_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CompanyProfile:
+      type: object
+      properties:
+        company_name:
+          type: string
+        company_address:
+          type: string
+        company_contact:
+          type: string
+        bank_account:
+          type: string
+        penanggungjawab:
+          type: string
+        jabatan:
+          type: string
+
+    DocumentSequence:
+      type: object
+      properties:
+        next_invoice_no:
+          type: string
+          description: Zero-padded invoice number, for example `INV-014`.
+        next_po_no:
+          type: string
+          description: Zero-padded purchase order number, for example `PO-009`.
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          description: Event class, for example `LOW_STOCK`.
+        title:
+          type: string
+        message:
+          type: string
+        level:
+          type: string
+          enum: [info, warning, critical]
+        is_read:
+          type: boolean
+        actor_id:
+          type: [integer, "null"]
+          description: User who triggered the notification; `null` for system events.
+        meta_json:
+          type: string
+          description: >-
+            JSON-encoded metadata for the event, for example
+            `{"item_id":"MBG-BHN-0001","current_stock":2.5,"threshold":5}`.
+        created_at:
+          type: string
+          format: date-time
+
+    UnreadCount:
+      type: object
+      properties:
+        count:
+          type: integer
+          format: int64
+
+    DashboardStats:
+      type: object
+      properties:
+        total_items:
+          type: integer
+          format: int64
+        stock_in:
+          type: number
+          description: Sum of all inbound stock amounts.
+        stock_out:
+          type: number
+          description: Sum of all outbound stock amounts.
+        total_budget:
+          type: integer
+          format: int64
+          description: Total of the master item catalogue value.
+        budget_in:
+          type: integer
+          format: int64
+          description: Total income recorded in finances.
+        budget_out:
+          type: integer
+          format: int64
+          description: Total expenses recorded in finances.
+        monthly_budget:
+          type: array
+          description: Monthly income and expense series for the dashboard chart.
+          items:
+            $ref: "#/components/schemas/MonthlyBudgetStat"
+        expense_composition:
+          type: array
+          description: Expense totals grouped by category.
+          items:
+            $ref: "#/components/schemas/ExpenseComposition"
+        system_activities:
+          type: array
+          description: Most recent audit trail entries for the dapur.
+          items:
+            $ref: "#/components/schemas/SystemActivity"
+
+    MonthlyBudgetStat:
+      type: object
+      properties:
+        month:
+          type: string
+          description: Month key in `YYYY-MM` form.
+        in:
+          type: integer
+          format: int64
+        out:
+          type: integer
+          format: int64
+
+    ExpenseComposition:
+      type: object
+      properties:
+        category:
+          type: string
+        amount:
+          type: integer
+          format: int64
+
+    SystemActivity:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          examples: [ADD-ITEM, UPDATE-STOCK, EDIT-STOCK-IN, DELETE-ITEM, ADD-FINANCE, DELETE-FINANCE]
+        title:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ── WebSocket events ────────────────────────────────────────────────────
+    WsEvent:
+      type: object
+      title: WebSocket event
+      description: Every frame pushed over `/ws`.
+      properties:
+        type:
+          type: string
+          enum: [ACTIVITY, LOW_STOCK]
+        message:
+          type: string
+        data:
+          oneOf:
+            - $ref: "#/components/schemas/ActivityLog"
+            - $ref: "#/components/schemas/LowStockEventData"
+
+    ActivityLog:
+      type: object
+      description: >-
+        Audit trail entry pushed with `type: ACTIVITY`. Stored permanently and
+        also surfaced in the dashboard activity list.
+      properties:
+        ID:
+          type: integer
+        CreatedAt:
+          type: string
+          format: date-time
+        UpdatedAt:
+          type: string
+          format: date-time
+        DeletedAt:
+          type: [string, "null"]
+          format: date-time
+          description: Always `null`; entries are never soft deleted.
+        Type:
+          type: string
+          examples: [ADD-ITEM, UPDATE-STOCK, EDIT-STOCK-IN, DELETE-ITEM, ADD-FINANCE, DELETE-FINANCE]
+        Title:
+          type: string
+        Description:
+          type: string
+        ActionBy:
+          type: string
+          description: Full name of the acting user.
+        DapurID:
+          type: integer
+
+    LowStockEventData:
+      type: object
+      description: "Payload pushed with `type: LOW_STOCK`."
+      properties:
+        item_id:
+          type: string
+        item_name:
+          type: string
+        current_stock:
+          type: number
+        threshold:
+          type: number
+        measure_unit:
+          type: string
+
+    # ── Requests ────────────────────────────────────────────────────────────
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 5
+          maxLength: 30
+          pattern: ^[a-zA-Z0-9]+$
+        password:
+          type: string
+          minLength: 4
+          maxLength: 30
+          description: Printable ASCII only.
+        remember_me:
+          type: boolean
+          default: false
+
+    CreateUserRequest:
+      type: object
+      required: [username, fullname, role, password]
+      properties:
+        username:
+          type: string
+          minLength: 5
+          maxLength: 30
+          pattern: ^[a-zA-Z0-9]+$
+        fullname:
+          type: string
+          minLength: 2
+          maxLength: 50
+        role:
+          type: string
+          enum: [Admin, Super Admin]
+        password:
+          type: string
+          description: >-
+            Strong-password policy: 8-30 printable ASCII characters with at
+            least one uppercase letter, one digit, and one symbol.
+          minLength: 8
+          maxLength: 30
+          example: Rahasia#2026
+
+    UpdateUserRequest:
+      type: object
+      description: Both members are optional; send only what changes.
+      properties:
+        fullname:
+          type: string
+          minLength: 2
+          maxLength: 50
+        old_password:
+          type: string
+          description: >-
+            Replacement password. The field name is kept for client
+            compatibility but it sets a new password, it is not checked
+            against the current one.
+          minLength: 8
+          maxLength: 30
+          example: Rahasia#2026
+
+    ResetPasswordRequest:
+      type: object
+      required: [username, new_password]
+      properties:
+        username:
+          type: string
+          minLength: 5
+          maxLength: 30
+          pattern: ^[a-zA-Z0-9]+$
+        new_password:
+          type: string
+          minLength: 8
+          maxLength: 30
+          example: Rahasia#2026
+
+    CreateDapurRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 255
+
+    UpdateDapurRequest:
+      type: object
+      description: Omitted members are left unchanged.
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 255
+        is_active:
+          type: boolean
+
+    AddItemRequest:
+      type: object
+      required: [name, category, stock, measure_unit, unit_price]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 90
+          description: Unique per dapur.
+        category:
+          type: string
+          minLength: 1
+          maxLength: 50
+        stock:
+          type: number
+          exclusiveMinimum: 0
+          description: Seeded into both `initial_stock` and `stock`.
+        measure_unit:
+          type: string
+          minLength: 1
+          maxLength: 30
+        unit_price:
+          type: number
+          exclusiveMinimum: 0
+        date_added:
+          type: string
+          format: date-time
+          description: Overrides `created_at` when supplied.
+
+    UpdateItemRequest:
+      type: object
+      description: >-
+        All members are optional. `stock` is accepted for compatibility; the
+        stored balance is always the MAC recalculation result.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 90
+        category:
+          type: string
+          minLength: 1
+          maxLength: 50
+        measure_unit:
+          type: string
+          minLength: 1
+          maxLength: 30
+        unit_price:
+          type: number
+          exclusiveMinimum: 0
+        stock:
+          type: number
+          exclusiveMinimum: 0
+        initial_stock:
+          type: number
+          minimum: 0
+        date_added:
+          type: string
+          format: date-time
+
+    CreateStockRequest:
+      type: object
+      required: [type, amount, unit_price]
+      properties:
+        type:
+          type: string
+          enum: [IN, OUT]
+        amount:
+          type: number
+          exclusiveMinimum: 0
+        unit_price:
+          type: number
+          minimum: 1
+        supplier:
+          type: string
+          maxLength: 100
+          description: Stored as `-` when omitted.
+
+    EditStockRequest:
+      type: object
+      required: [amount, unit_price]
+      properties:
+        amount:
+          type: number
+          exclusiveMinimum: 0
+        unit_price:
+          type: number
+          exclusiveMinimum: 0
+        supplier:
+          type: string
+          maxLength: 100
+
+    GenerateInvoiceRequest:
+      type: object
+      description: >-
+        `company_*`, `invoice_no`, `po_no`, and `bank_account` are filled from
+        the company profile and document sequence when left blank.
+      required: [penanggungjawab, jabatan, receiver_name, receiver_address]
+      properties:
+        company_name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        company_address:
+          type: string
+          minLength: 2
+          maxLength: 200
+        company_contact:
+          type: string
+          minLength: 2
+          maxLength: 100
+        invoice_no:
+          type: string
+          minLength: 1
+          maxLength: 50
+        date:
+          type: string
+          description: >-
+            Invoice date, free text in any format accepted by
+            `FormatDateStringID`; the rendered PDF translates known English
+            month names to Indonesian.
+          example: "2026-10-12"
+        po_no:
+          type: string
+          maxLength: 50
+        kebutuhan:
+          type: string
+          maxLength: 50
+        receiver_name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        receiver_address:
+          type: string
+          minLength: 2
+          maxLength: 200
+        date_from:
+          type: string
+          description: Lower bound for the stock track selection.
+        date_to:
+          type: string
+          description: Upper bound for the stock track selection.
+        stock_ids:
+          type: array
+          description: Explicit stock track ids; takes precedence over the date range.
+          items:
+            type: integer
+        stock_type:
+          type: string
+          enum: [IN, OUT]
+          default: OUT
+          description: Which stock direction to invoice.
+        keterangan:
+          type: string
+          maxLength: 500
+        penanggungjawab:
+          type: string
+          minLength: 2
+          maxLength: 100
+        jabatan:
+          type: string
+          minLength: 2
+          maxLength: 100
+        bank_account:
+          type: string
+          maxLength: 100
+          description: Falls back to the configured bank account when blank.
+
+    UpdateInvoiceRequest:
+      type: object
+      required: [company_name, company_address, company_contact]
+      properties:
+        company_name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        company_address:
+          type: string
+          minLength: 2
+          maxLength: 200
+        company_contact:
+          type: string
+          minLength: 2
+          maxLength: 100
+        receiver_name:
+          type: string
+          maxLength: 100
+        receiver_address:
+          type: string
+          maxLength: 200
+        invoice_date:
+          type: string
+          maxLength: 100
+        keterangan:
+          type: string
+          maxLength: 500
+        penanggungjawab:
+          type: string
+          maxLength: 100
+        jabatan:
+          type: string
+          maxLength: 100
+        bank_account:
+          type: string
+          maxLength: 100
+        stock_ids:
+          type: array
+          description: Replaces the stored line items.
+          items:
+            type: integer
+
+    AddFinanceForm:
+      type: object
+      required: [type, description, amount, proof_image]
+      properties:
+        type:
+          type: string
+          enum: [PEMASUKAN, PENGELUARAN]
+        category:
+          type: string
+          maxLength: 100
+          description: >-
+            Required for `PENGELUARAN`; the client sends `Pemasukan` for
+            `PEMASUKAN`.
+        description:
+          type: string
+          maxLength: 255
+        amount:
+          type: integer
+          description: Whole rupiah, sent as a decimal string in the form field.
+        extra_note:
+          type: string
+          maxLength: 255
+        proof_image:
+          type: string
+          format: binary
+          description: Proof image, `.png`, `.jpg`, or `.jpeg`, up to 15 MB.
+
+    UpdateFinanceForm:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [PEMASUKAN, PENGELUARAN]
+        category:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 255
+        amount:
+          type: integer
+        extra_note:
+          type: string
+          maxLength: 255
+        proof_image:
+          type: string
+          format: binary
+          description: Omit to keep the stored image; a new file replaces and deletes the old one.
+
+    CompanyProfileRequest:
+      type: object
+      required: [company_name, company_address, company_contact]
+      properties:
+        company_name:
+          type: string
+        company_address:
+          type: string
+        company_contact:
+          type: string
+        bank_account:
+          type: string
+          maxLength: 200
+        penanggungjawab:
+          type: string
+          maxLength: 100
+        jabatan:
+          type: string
+          maxLength: 100
