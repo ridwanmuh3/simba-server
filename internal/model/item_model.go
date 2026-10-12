@@ -299,6 +299,6 @@ type GetInvoiceItemsFlatRequest struct {
 	EndDate     string `query:"end_date,omitempty" validate:"omitempty"`
 	StockType   string `query:"stock_type,omitempty" validate:"omitempty,oneof=IN OUT"`
 	Page        int    `query:"page,omitempty" validate:"omitempty,min=1"`
-	Size        int    `query:"size,omitempty" validate:"omitempty,min=1,max=9999"`
+	Size        int    `query:"size,omitempty" validate:"omitempty,min=1,max=100"`
 	DapurID     uint   `json:"-"`
 }

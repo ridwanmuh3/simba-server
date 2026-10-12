@@ -43,6 +43,17 @@ func GetAuthUser(c *fiber.Ctx) *model.Auth {
 	return auth.(*model.Auth)
 }
 
+func GetRequiredDapurID(c *fiber.Ctx) (uint, error) {
+	auth := GetAuthUser(c)
+	if auth == nil {
+		return 0, exception.UserUnauthorizedError
+	}
+	if auth.CurrentDapurID == nil {
+		return 0, exception.DapurNotSelectedError
+	}
+	return *auth.CurrentDapurID, nil
+}
+
 // NewDapurRequiredMiddleware rejects requests where user has not selected a dapur.
 // Must run after NewAuthMiddleware.
 func NewDapurRequiredMiddleware(logger *zap.SugaredLogger) fiber.Handler {

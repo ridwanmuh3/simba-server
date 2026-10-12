@@ -120,6 +120,216 @@ func TestGetTotalPrice_DecimalStockNoFloatDrift(t *testing.T) {
 	}
 }
 
+func TestFormatDateStringID(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		wantMonth string
+	}{
+		{"januari", "2026-01-15 10:00:00", "Januari"},
+		{"februari", "2026-02-15 10:00:00", "Februari"},
+		{"maret", "2026-03-15 10:00:00", "Maret"},
+		{"april", "2026-04-15 10:00:00", "April"},
+		{"mei", "2026-05-15 10:00:00", "Mei"},
+		{"juni", "2026-06-15 10:00:00", "Juni"},
+		{"juli", "2026-07-15 10:00:00", "Juli"},
+		{"agustus", "2026-08-15 10:00:00", "Agustus"},
+		{"september", "2026-09-15 10:00:00", "September"},
+		{"oktober", "2026-10-15 10:00:00", "Oktober"},
+		{"november", "2026-11-15 10:00:00", "November"},
+		{"desember", "2026-12-15 10:00:00", "Desember"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FormatDateStringID(tc.input)
+			if !strings.Contains(got, tc.wantMonth) {
+				t.Errorf("FormatDateStringID(%q) = %q, want to contain %q", tc.input, got, tc.wantMonth)
+			}
+		})
+	}
+}
+
+func TestIsStrongPassword(t *testing.T) {
+	tests := []struct {
+		name     string
+		password string
+		want     bool
+	}{
+		// Positive cases
+		{name: "valid", password: "Strongpass1!", want: true},
+		{name: "valid with symbols", password: "Abc123#$_", want: true},
+		{name: "valid min length 8", password: "Abc123!x", want: true},
+		{name: "valid max length 30", password: "Abcdefghij1234567890!@#$%^&*", want: true},
+		// Negative cases
+		{name: "too short", password: "A1!aaaa", want: false},
+		{name: "too long 31 chars", password: "Abcdefghij1234567890!@#$%^&*00x", want: false},
+		{name: "missing uppercase", password: "strongpass1!", want: false},
+		{name: "missing number", password: "Strongpass!", want: false},
+		{name: "missing symbol", password: "Strongpass1", want: false},
+		{name: "non ascii", password: "Strongpass1é!", want: false},
+		{name: "empty string", password: "", want: false},
+		{name: "only lowercase", password: "abcdefgh", want: false},
+		{name: "only numbers", password: "12345678", want: false},
+		{name: "only symbols", password: "!@#$%^&*", want: false},
+		{name: "control char", password: "Strong\x01pass1!", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsStrongPassword(tt.password); got != tt.want {
+				t.Fatalf("IsStrongPassword(%q) = %v, want %v", tt.password, got, tt.want)
+			}
+		})
+	}
+}
+
+// ─── GenerateRandomString ─────────────────────────────────────────────
+
+func TestGenerateRandomString_Length(t *testing.T) {
+	for _, l := range []int{0, 1, 10, 32, 64, 128} {
+		got := GenerateRandomString(l)
+		if len(got) != l {
+			t.Errorf("GenerateRandomString(%d) returned length %d", l, len(got))
+		}
+	}
+}
+
+func TestGenerateRandomString_Unique(t *testing.T) {
+	a := GenerateRandomString(32)
+	b := GenerateRandomString(32)
+	if a == b {
+		t.Errorf("two random strings should differ, both = %q", a)
+	}
+}
+
+func TestGenerateRandomString_Charset(t *testing.T) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	s := GenerateRandomString(100)
+	for i, ch := range s {
+		found := false
+		for _, c := range charset {
+			if ch == c {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("char at index %d (%c) not in charset", i, ch)
+		}
+	}
+}
+
+func TestGenerateRandomString_Empty(t *testing.T) {
+	s := GenerateRandomString(0)
+	if s != "" {
+		t.Errorf("GenerateRandomString(0) should be empty, got %q", s)
+	}
+}
+
+// ─── HashToken ──────────────────────────────────────────────────────────
+
+func TestHashToken_Deterministic(t *testing.T) {
+	token := "abc123secret"
+	h1 := HashToken(token)
+	h2 := HashToken(token)
+	if h1 != h2 {
+		t.Errorf("HashToken should be deterministic: %q != %q", h1, h2)
+	}
+}
+
+func TestHashToken_NotBareToken(t *testing.T) {
+	token := "abc123secret"
+	h := HashToken(token)
+	if h == token {
+		t.Error("HashToken should not return bare plaintext")
+	}
+}
+
+func TestHashToken_Hex64Chars(t *testing.T) {
+	h := HashToken("test")
+	if len(h) != 64 {
+		t.Errorf("SHA-256 hex should be 64 chars, got %d: %q", len(h), h)
+	}
+	for _, ch := range h {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) {
+			t.Errorf("non-hex char in hash: %c", ch)
+		}
+	}
+}
+
+func TestHashToken_DifferentInputsProduceDifferentHashes(t *testing.T) {
+	h1 := HashToken("token-a")
+	h2 := HashToken("token-b")
+	if h1 == h2 {
+		t.Error("different tokens should produce different hashes")
+	}
+}
+
+// ─── DeleteFile (security) ─────────────────────────────────────────────
+
+func TestDeleteFile_PathTraversal(t *testing.T) {
+	// Path traversal outside uploads/ should be rejected.
+	err := DeleteFile("/../../../etc/passwd")
+	if err == nil {
+		t.Error("path traversal should be rejected")
+	}
+}
+
+func TestDeleteFile_NonExistentFile(t *testing.T) {
+	err := DeleteFile("/uploads/nonexistent-file-12345.txt")
+	if err == nil {
+		t.Error("non-existent file should return error")
+	}
+}
+
+// ─── FormatDateStringID negative cases ──────────────────────────────────
+
+func TestFormatDateStringID_InvalidFormat(t *testing.T) {
+	// Invalid date string should be returned as-is.
+	got := FormatDateStringID("not-a-date")
+	if got != "not-a-date" {
+		t.Errorf("FormatDateStringID(%q) = %q, want same input", "not-a-date", got)
+	}
+}
+
+func TestFormatDateStringID_EmptyString(t *testing.T) {
+	got := FormatDateStringID("")
+	if got != "" {
+		t.Errorf("FormatDateStringID(\"\") = %q, want empty", got)
+	}
+}
+
+// ─── Round2 / Round4 negative cases ────────────────────────────────────
+
+func TestRound2_VeryLargeNumber(t *testing.T) {
+	got := Round2(1e15 + 0.001)
+	want := 1e15
+	if !almostEqual(got, want, 1) {
+		t.Errorf("Round2(%v) = %v, want %v", 1e15+0.001, got, want)
+	}
+}
+
+func TestRound4_VerySmallNumber(t *testing.T) {
+	got := Round4(0.000001)
+	if got != 0 {
+		t.Errorf("Round4(0.000001) = %v, want 0", got)
+	}
+}
+
+func TestGetTotalPrice_ZeroQuantity(t *testing.T) {
+	got := GetTotalPrice(0, 50000)
+	if got != 0 {
+		t.Errorf("GetTotalPrice(0, 50000) = %v, want 0", got)
+	}
+}
+
+func TestGetTotalPrice_ZeroPrice(t *testing.T) {
+	got := GetTotalPrice(10, 0)
+	if got != 0 {
+		t.Errorf("GetTotalPrice(10, 0) = %v, want 0", got)
+	}
+}
+
 func TestGenerateTemplateInvoicePDF_SubtotalMatchesLineSum(t *testing.T) {
 	data := &model.InvoiceData{
 		CompanyName:     "PT Test",

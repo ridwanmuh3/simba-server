@@ -15,39 +15,39 @@ func TestCreateUser(t *testing.T) {
 		wantStatus int
 	}{
 		{
-			name:    "super admin creates user",
-			cookies: superAdminCookies,
-			body:    map[string]string{"username": "newadmin01", "fullname": "New Admin One", "role": "Admin", "password": "newadmin01"},
+			name:       "super admin creates user",
+			cookies:    superAdminCookies,
+			body:       map[string]string{"username": "newadmin01", "fullname": "New Admin One", "role": "Admin", "password": "Newadmin1!"},
 			wantStatus: http.StatusCreated,
 		},
 		{
-			name:    "admin cannot create user (403)",
-			cookies: adminCookies,
-			body:    map[string]string{"username": "newadmin02", "fullname": "New Admin Two", "role": "Admin", "password": "newadmin02"},
+			name:       "admin cannot create user (403)",
+			cookies:    adminCookies,
+			body:       map[string]string{"username": "newadmin02", "fullname": "New Admin Two", "role": "Admin", "password": "Newadmin2!"},
 			wantStatus: http.StatusForbidden,
 		},
 		{
 			name:       "unauthenticated returns 401",
 			cookies:    nil,
-			body:       map[string]string{"username": "newadmin03", "fullname": "New Admin Three", "role": "Admin", "password": "newadmin03"},
+			body:       map[string]string{"username": "newadmin03", "fullname": "New Admin Three", "role": "Admin", "password": "Newadmin3!"},
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
 			name:       "missing username returns 400",
 			cookies:    superAdminCookies,
-			body:       map[string]string{"fullname": "No Username", "role": "Admin", "password": "somepass"},
+			body:       map[string]string{"fullname": "No Username", "role": "Admin", "password": "Somepass1!"},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name:       "invalid role returns 400",
 			cookies:    superAdminCookies,
-			body:       map[string]string{"username": "newadmin04", "fullname": "Bad Role", "role": "Manager", "password": "somepass"},
+			body:       map[string]string{"username": "newadmin04", "fullname": "Bad Role", "role": "Manager", "password": "Somepass1!"},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name:       "username too short returns 400",
 			cookies:    superAdminCookies,
-			body:       map[string]string{"username": "abc", "fullname": "Short Name", "role": "Admin", "password": "somepass"},
+			body:       map[string]string{"username": "abc", "fullname": "Short Name", "role": "Admin", "password": "Somepass1!"},
 			wantStatus: http.StatusBadRequest,
 		},
 	}
@@ -66,12 +66,42 @@ func TestCreateUser(t *testing.T) {
 	testDB.Exec("DELETE FROM users WHERE username IN ('newadmin01','newadmin02','newadmin03','newadmin04')")
 }
 
+func TestUserPasswordComplexity(t *testing.T) {
+	t.Run("weak password returns 400", func(t *testing.T) {
+		body := map[string]string{
+			"username": "weakadmin1",
+			"fullname": "Weak Admin",
+			"role":     "Admin",
+			"password": "weakpass",
+		}
+		resp := doJSON(http.MethodPost, "/api/users", body, superAdminCookies)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("got %d, want 400", resp.StatusCode)
+		}
+	})
+
+	t.Run("strong password creates user", func(t *testing.T) {
+		body := map[string]string{
+			"username": "strongadmin1",
+			"fullname": "Strong Admin",
+			"role":     "Admin",
+			"password": "Strongpass1!",
+		}
+		resp := doJSON(http.MethodPost, "/api/users", body, superAdminCookies)
+		defer testDB.Exec("DELETE FROM users WHERE username = 'strongadmin1'")
+		if resp.StatusCode != http.StatusCreated {
+			r := parseResp(resp)
+			t.Fatalf("got %d: %v", resp.StatusCode, r.Error)
+		}
+	})
+}
+
 func TestCreateUserDuplicateUsername(t *testing.T) {
 	body := map[string]string{
 		"username": "dupeuser1",
 		"fullname": "Dupe User One",
 		"role":     "Admin",
-		"password": "dupepass",
+		"password": "Dupepass1!",
 	}
 	defer testDB.Exec("DELETE FROM users WHERE username = 'dupeuser1'")
 
@@ -92,7 +122,7 @@ func TestUpdateUser(t *testing.T) {
 		"username": "updatetarget",
 		"fullname": "Update Target",
 		"role":     "Admin",
-		"password": "updatepass",
+		"password": "Updatepass1!",
 	}
 	createResp := doJSON(http.MethodPost, "/api/users", createBody, superAdminCookies)
 	if createResp.StatusCode != http.StatusCreated {
@@ -136,7 +166,7 @@ func TestDeleteUser(t *testing.T) {
 		"username": "deletetarget",
 		"fullname": "Delete Target",
 		"role":     "Admin",
-		"password": "deletepass",
+		"password": "Deletepass1!",
 	}
 	createResp := doJSON(http.MethodPost, "/api/users", createBody, superAdminCookies)
 	if createResp.StatusCode != http.StatusCreated {

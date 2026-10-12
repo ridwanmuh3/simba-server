@@ -8,7 +8,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type SettingRepository struct{}
+type SettingRepository struct {
+	Repository[entity.AppSetting]
+}
 
 func NewSettingRepository() *SettingRepository {
 	return &SettingRepository{}

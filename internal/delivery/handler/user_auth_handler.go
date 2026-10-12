@@ -81,11 +81,24 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return err
 	}
 
+	rateKey := c.IP() + "|" + service.NormalizeLoginLimiterUsername(request.Username)
+	retryAfter, limited := h.rateLimiter.Record(rateKey)
+	if limited {
+		h.log.Warnf("login rate limited for key: %s", rateKey)
+		c.Set(fiber.HeaderRetryAfter, retryAfter)
+		return c.Status(fiber.StatusTooManyRequests).JSON(model.Response[any]{
+			Status: fiber.StatusTooManyRequests,
+			Error:  "too many login attempts",
+		})
+	}
+
 	response, err := h.userService.Login(c.Context(), request)
 	if err != nil {
 		h.log.Warnf("failed to login user: %v", err)
 		return err
 	}
+
+	h.rateLimiter.ForgetSuccessful(rateKey)
 
 	setAuthCookies(c, response.Token, response.RefreshToken)
 
@@ -93,6 +106,22 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		Status:  fiber.StatusOK,
 		Message: "user login success",
 		Data:    response,
+	})
+}
+
+func (h *UserHandler) CSRFToken(c *fiber.Ctx) error {
+	token, ok := c.Locals(middleware.CSRFContextKey).(string)
+	if !ok || token == "" {
+		h.log.Warnf("csrf token missing from context")
+		return fiber.NewError(fiber.StatusInternalServerError, "csrf token unavailable")
+	}
+
+	return c.JSON(model.Response[map[string]string]{
+		Status:  fiber.StatusOK,
+		Message: "csrf token success",
+		Data: map[string]string{
+			"csrf_token": token,
+		},
 	})
 }
 

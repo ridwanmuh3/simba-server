@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"github.com/ridwanmuh3/simba-server/internal/delivery/handler"
 	"github.com/ridwanmuh3/simba-server/internal/delivery/middleware"
@@ -13,6 +14,7 @@ import (
 
 type RouteConfig struct {
 	App                     *fiber.App
+	DB                      *gorm.DB
 	UserHandler             *handler.UserHandler
 	ItemHandler             *handler.ItemHandler
 	StockHandler            *handler.StockHandler
@@ -21,10 +23,14 @@ type RouteConfig struct {
 	DashboardHandler        *handler.DashboardHandler
 	SettingHandler          *handler.SettingHandler
 	DapurHandler            *handler.DapurHandler
+	NotificationHandler     *handler.NotificationHandler
+	WebsocketHandler        fiber.Handler
 	AuthMiddleware          fiber.Handler
 	DapurRequiredMiddleware fiber.Handler
 	Log                     *zap.SugaredLogger
 }
+
+var startTime = time.Now()
 
 func (c *RouteConfig) Setup() {
 	c.SetupPublicRoute()
@@ -36,9 +42,12 @@ func (c *RouteConfig) Setup() {
 	c.SetupFinanceRoute()
 	c.SetupDashboardRoute()
 	c.SetupSettingRoute()
+	c.SetupNotificationRoute()
+	c.SetupWebSocketRoute()
 }
 
 func (c *RouteConfig) SetupPublicRoute() {
+	db := c.DB
 	c.App.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(model.Response[any]{
 			Status:  fiber.StatusOK,
@@ -47,13 +56,39 @@ func (c *RouteConfig) SetupPublicRoute() {
 	})
 
 	c.App.Get("/health", func(c *fiber.Ctx) error {
-		return c.SendString("API OK!")
+		status := "healthy"
+		dbStatus := "connected"
+
+		if db == nil {
+			status = "unhealthy"
+			dbStatus = "not configured"
+		} else {
+			sqlDB, err := db.DB()
+			if err != nil || sqlDB.Ping() != nil {
+				status = "unhealthy"
+				dbStatus = "disconnected"
+			}
+		}
+
+		uptime := time.Since(startTime).Round(time.Second).String()
+
+		return c.JSON(model.Response[map[string]string]{
+			Status:  fiber.StatusOK,
+			Message: "API is running",
+			Data: map[string]string{
+				"status":  status,
+				"db":      dbStatus,
+				"uptime":  uptime,
+				"version": "1.0.0",
+			},
+		})
 	})
 }
 
 func (c *RouteConfig) SetupAuthRoute() {
 	authRoute := c.App.Group("/api/auth")
 
+	authRoute.Get("/csrf", c.UserHandler.CSRFToken)
 	authRoute.Post("/login", c.UserHandler.Login)
 	authRoute.Delete("/logout", c.AuthMiddleware, c.UserHandler.Logout)
 	authRoute.Get("/_current", c.AuthMiddleware, c.UserHandler.Current)
@@ -155,4 +190,21 @@ func (c *RouteConfig) SetupSettingRoute() {
 	settingRoute.Get("/company", c.SettingHandler.GetCompanyProfile)
 	settingRoute.Put("/company", c.SettingHandler.UpdateCompanyProfile)
 	settingRoute.Get("/next-document-number", c.SettingHandler.GetNextDocumentNumbers)
+}
+
+func (c *RouteConfig) SetupNotificationRoute() {
+	notifRoute := c.App.Group("/api/notifications")
+	notifRoute.Use(c.AuthMiddleware, middleware.NewRbacMiddleware(c.Log, "Admin", "Super Admin"), c.DapurRequiredMiddleware)
+
+	notifRoute.Get("/", c.NotificationHandler.FindAll)
+	notifRoute.Get("/unread-count", c.NotificationHandler.UnreadCount)
+	notifRoute.Patch("/:id/read", c.NotificationHandler.MarkRead)
+	notifRoute.Patch("/read-all", c.NotificationHandler.MarkAllRead)
+	notifRoute.Delete("/:id", c.NotificationHandler.Delete)
+}
+
+func (c *RouteConfig) SetupWebSocketRoute() {
+	wsRoute := c.App.Group("/ws")
+	wsRoute.Use(c.AuthMiddleware, c.DapurRequiredMiddleware)
+	wsRoute.Get("/", c.WebsocketHandler)
 }

@@ -12,20 +12,20 @@ import (
 )
 
 type DashboardHandler struct {
-	log              *zap.SugaredLogger
-	dashboardService DashboardUsecase
+	log               *zap.SugaredLogger
+	dashboardService  DashboardServiceInterface
 }
 
-type DashboardUsecase interface {
+type DashboardServiceInterface interface {
 	GetDashboardStats(ctx context.Context, dapurID uint) (*model.DashboardStatsResponse, error)
 }
 
-var _ DashboardUsecase = (*service.DashboardService)(nil)
+var _ DashboardServiceInterface = (*service.DashboardService)(nil)
 
-func NewDashboardHandler(logger *zap.SugaredLogger, dashboardService DashboardUsecase) *DashboardHandler {
+func NewDashboardHandler(logger *zap.SugaredLogger, dashboardService DashboardServiceInterface) *DashboardHandler {
 	return &DashboardHandler{
-		log:              logger,
-		dashboardService: dashboardService,
+		log:               logger,
+		dashboardService:  dashboardService,
 	}
 }
 

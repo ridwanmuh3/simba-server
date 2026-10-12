@@ -26,17 +26,17 @@ func main() {
 	// 1. Seed Users
 	// ──────────────────────────────────────────────
 	users := []*model.CreateUserRequest{
-		{Username: "superadmin1", Password: "superadmin1", Fullname: "Budi Almaliki", Role: "Super Admin"},
-		{Username: "admin1", Password: "admin1", Fullname: "Andi Wijaya", Role: "Admin"},
-		{Username: "admin2", Password: "admin2", Fullname: "Aulia Rahman", Role: "Admin"},
-		{Username: "admin3", Password: "admin3", Fullname: "Farah Nabila", Role: "Admin"},
-		{Username: "admin4", Password: "admin4", Fullname: "Ilham Akbar", Role: "Admin"},
-		{Username: "admin5", Password: "admin5", Fullname: "Rafi Kurniawan", Role: "Admin"},
-		{Username: "admin6", Password: "admin6", Fullname: "Dimas Saputra", Role: "Admin"},
-		{Username: "admin7", Password: "admin7", Fullname: "Naufal Hakim", Role: "Admin"},
-		{Username: "admin8", Password: "admin8", Fullname: "Hendra Gunawan", Role: "Admin"},
-		{Username: "admin9", Password: "admin9", Fullname: "Wahyu Setiawan", Role: "Admin"},
-		{Username: "admin10", Password: "admin10", Fullname: "Bayu Prakoso", Role: "Admin"},
+		{Username: "superadmin1", Password: "Superadmin1!", Fullname: "Budi Almaliki", Role: "Super Admin"},
+		{Username: "admin1", Password: "Adminuser1!", Fullname: "Andi Wijaya", Role: "Admin"},
+		{Username: "admin2", Password: "Adminuser2!", Fullname: "Aulia Rahman", Role: "Admin"},
+		{Username: "admin3", Password: "Adminuser3!", Fullname: "Farah Nabila", Role: "Admin"},
+		{Username: "admin4", Password: "Adminuser4!", Fullname: "Ilham Akbar", Role: "Admin"},
+		{Username: "admin5", Password: "Adminuser5!", Fullname: "Rafi Kurniawan", Role: "Admin"},
+		{Username: "admin6", Password: "Adminuser6!", Fullname: "Dimas Saputra", Role: "Admin"},
+		{Username: "admin7", Password: "Adminuser7!", Fullname: "Naufal Hakim", Role: "Admin"},
+		{Username: "admin8", Password: "Adminuser8!", Fullname: "Hendra Gunawan", Role: "Admin"},
+		{Username: "admin9", Password: "Adminuser9!", Fullname: "Wahyu Setiawan", Role: "Admin"},
+		{Username: "admin10", Password: "Adminuser10!", Fullname: "Bayu Prakoso", Role: "Admin"},
 	}
 
 	for _, user := range users {
@@ -298,7 +298,6 @@ func main() {
 			Kebutuhan:      "QUO-0096",
 		},
 	}
-
 	for i := range invoices {
 		invoices[i].CreatedAt = now.AddDate(0, 0, -(12 - i*2))
 		var existing entity.Invoice

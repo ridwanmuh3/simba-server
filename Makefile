@@ -1,5 +1,3 @@
-# ROOT := $(abspath ..)
-
 run-dev:
 	APP_MODE=dev go run ./cmd/app/main.go
 
@@ -19,7 +17,3 @@ test:
 
 tidy:
 	go mod tidy
-
-# Delegate stack orchestration to the root Makefile.
-# %:
-# 	$(MAKE) -C $(ROOT) $@

@@ -10,5 +10,6 @@ import (
 func NewValidator(viper *viper.Viper) *validator.Validate {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	validate.RegisterValidation("userrole", util.ValidateUserRole)
+	validate.RegisterValidation("strongpassword", util.ValidateStrongPassword)
 	return validate
 }

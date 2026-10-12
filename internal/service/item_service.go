@@ -236,54 +236,14 @@ func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemReque
 		item.InitialStock = util.Round4(*request.InitialStock)
 	}
 
-	var stockTracks []entity.StockTracking
-	if err := tx.Where("item_id = ? AND dapur_id = ? AND deleted_at IS NULL", item.ID, request.DapurID).
-		Order("created_at ASC").
-		Find(&stockTracks).Error; err != nil {
-		s.log.Errorf("failed to fetch stock tracking records: %v", err)
+	_, finalStock, finalTotalPrice, err := util.RecalculateMAC(tx, item, request.DapurID)
+	if err != nil {
+		s.log.Errorf("failed to recalculate MAC: %v", err)
 		return nil, exception.InternalServerError
 	}
 
-	runningStock := item.InitialStock
-	totalPrice := util.Round2(item.InitialStock * request.UnitPrice)
-
-	for i := range stockTracks {
-		prevStock := runningStock
-		stockTracks[i].PreviousStock = util.Round4(prevStock)
-
-		switch stockTracks[i].Type {
-		case "IN":
-			runningStock = util.Round4(runningStock + stockTracks[i].Amount)
-			totalPrice = util.Round2(totalPrice + stockTracks[i].Amount*stockTracks[i].UnitPrice)
-		case "OUT":
-			if prevStock <= 0 {
-				s.log.Errorf("invalid state: stock below zero")
-				return nil, exception.InternalServerError
-			}
-
-			avg := totalPrice / prevStock
-			deduction := util.Round2(avg * stockTracks[i].Amount)
-			runningStock = util.Round4(runningStock - stockTracks[i].Amount)
-			totalPrice = util.Round2(totalPrice - deduction)
-		}
-
-		stockTracks[i].NewStock = util.Round4(runningStock)
-	}
-
-	for i := range stockTracks {
-		if err := tx.Model(&entity.StockTracking{}).
-			Where("id = ?", stockTracks[i].ID).
-			UpdateColumns(map[string]any{
-				"previous_stock": stockTracks[i].PreviousStock,
-				"new_stock":      stockTracks[i].NewStock,
-			}).Error; err != nil {
-			s.log.Errorf("failed to update stock tracking id=%d: %v", stockTracks[i].ID, err)
-			return nil, exception.InternalServerError
-		}
-	}
-
-	item.Stock = util.Round4(runningStock)
-	item.TotalPrice = util.Round2(totalPrice)
+	item.Stock = finalStock
+	item.TotalPrice = finalTotalPrice
 	item.UnitPrice = request.UnitPrice
 
 	if err := tx.Model(item).

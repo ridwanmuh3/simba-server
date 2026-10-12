@@ -77,6 +77,7 @@ func main() {
 		&entity.AppSetting{},
 		&entity.Invoice{},
 		&entity.InvoiceItem{},
+		&entity.Notification{},
 	); err != nil {
 		log.Fatalf("migration failed: %v", err)
 	}

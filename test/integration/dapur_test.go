@@ -122,7 +122,7 @@ func TestDapurRequiredMiddlewareIntegration(t *testing.T) {
 		"username": username,
 		"fullname": "No Dapur User",
 		"role":     "Admin",
-		"password": "nodapurpass",
+		"password": "Nodapur1!",
 	}, superAdminCookies)
 	if createResp.StatusCode != http.StatusCreated {
 		r := parseResp(createResp)
@@ -130,7 +130,7 @@ func TestDapurRequiredMiddlewareIntegration(t *testing.T) {
 	}
 	defer testDB.Exec("DELETE FROM users WHERE username = ?", username)
 
-	cookies := mustLoginUser(username, "nodapurpass")
+	cookies := mustLoginUser(username, "Nodapur1!")
 	resp := doJSON(http.MethodGet, "/api/items", nil, cookies)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)

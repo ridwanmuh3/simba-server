@@ -16,7 +16,7 @@ func TestLogin(t *testing.T) {
 		{"super admin success", testSuperAdminUsername, testSuperAdminPassword, http.StatusOK},
 		{"admin success", testAdminUsername, testAdminPassword, http.StatusOK},
 		{"wrong password", testSuperAdminUsername, "wrongpassword", http.StatusUnauthorized},
-		{"nonexistent user", "notexistuser99", "somepass", http.StatusUnauthorized},
+		{"nonexistent user", "notexistuser99", "Somepass1!", http.StatusUnauthorized},
 		{"empty username", "", testAdminPassword, http.StatusBadRequest},
 		{"empty password", testAdminUsername, "", http.StatusBadRequest},
 		{"username too short", "abc", "validpass", http.StatusBadRequest},
@@ -57,6 +57,48 @@ func TestLoginSetsCookies(t *testing.T) {
 	}
 	if !refreshCookie {
 		t.Error("refresh_token cookie not set")
+	}
+}
+
+func TestCSRFProtection(t *testing.T) {
+	t.Run("unsafe request without csrf returns 403", func(t *testing.T) {
+		body := map[string]string{"username": testAdminUsername, "password": testAdminPassword}
+		resp := doJSONWithoutCSRF(http.MethodPost, "/api/auth/login", body, nil)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("got %d, want 403", resp.StatusCode)
+		}
+	})
+
+	t.Run("csrf endpoint returns token cookie", func(t *testing.T) {
+		resp := doJSON(http.MethodGet, "/api/auth/csrf", nil, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("got %d, want 200", resp.StatusCode)
+		}
+
+		found := false
+		for _, cookie := range resp.Cookies() {
+			if cookie.Name == "csrf_" && cookie.Value != "" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("csrf cookie not set")
+		}
+	})
+}
+
+func TestLoginRateLimit(t *testing.T) {
+	body := map[string]string{"username": "ratelimit01", "password": "Wrongpass1!"}
+	for i := 0; i < 5; i++ {
+		resp := doJSON(http.MethodPost, "/api/auth/login", body, nil)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("attempt %d got %d, want 401", i+1, resp.StatusCode)
+		}
+	}
+
+	resp := doJSON(http.MethodPost, "/api/auth/login", body, nil)
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("got %d, want 429", resp.StatusCode)
 	}
 }
 
@@ -154,7 +196,7 @@ func TestRegister(t *testing.T) {
 			"username": "registertest1",
 			"fullname": "Register Test One",
 			"role":     "Admin",
-			"password": "registerpass",
+			"password": "Register1!",
 		}
 		resp := doJSON(http.MethodPost, "/api/auth/register", body, nil, map[string]string{
 			"X-Reset-Secret": testResetSecret,
@@ -172,7 +214,7 @@ func TestRegister(t *testing.T) {
 			"username": "registertest2",
 			"fullname": "Register Test Two",
 			"role":     "Admin",
-			"password": "registerpass",
+			"password": "Register1!",
 		}
 		resp := doJSON(http.MethodPost, "/api/auth/register", body, nil)
 		if resp.StatusCode != http.StatusUnauthorized {
@@ -185,7 +227,7 @@ func TestRegister(t *testing.T) {
 			"username": "registertest3",
 			"fullname": "Register Test Three",
 			"role":     "Admin",
-			"password": "registerpass",
+			"password": "Register1!",
 		}
 		resp := doJSON(http.MethodPost, "/api/auth/register", body, nil, map[string]string{
 			"X-Reset-Secret": "wrongsecret",
@@ -200,7 +242,7 @@ func TestRegister(t *testing.T) {
 			"username": testAdminUsername,
 			"fullname": "Duplicate User",
 			"role":     "Admin",
-			"password": "somepass",
+			"password": "Somepass1!",
 		}
 		resp := doJSON(http.MethodPost, "/api/auth/register", body, nil, map[string]string{
 			"X-Reset-Secret": testResetSecret,
@@ -223,7 +265,7 @@ func TestResetPassword(t *testing.T) {
 	t.Run("success with valid secret", func(t *testing.T) {
 		body := map[string]string{
 			"username":     testSuperAdminUsername,
-			"new_password": "newpassword99",
+			"new_password": "Newpassword99!",
 		}
 		resp := doJSON(http.MethodPost, "/api/auth/reset-password", body, nil, map[string]string{
 			"X-Reset-Secret": testResetSecret,
@@ -245,7 +287,7 @@ func TestResetPassword(t *testing.T) {
 	})
 
 	t.Run("missing secret returns 401", func(t *testing.T) {
-		body := map[string]string{"username": testAdminUsername, "new_password": "newpass"}
+		body := map[string]string{"username": testAdminUsername, "new_password": "Newpass1!"}
 		resp := doJSON(http.MethodPost, "/api/auth/reset-password", body, nil)
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Errorf("got %d, want 401", resp.StatusCode)

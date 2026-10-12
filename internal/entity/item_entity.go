@@ -17,6 +17,7 @@ type Item struct {
 	TotalPrice   float64 `gorm:"not null"`
 	ModifiedBy   string  `gorm:"size:50;not null"`
 	DapurID      uint    `gorm:"not null;index;uniqueIndex:idx_items_name_dapur"`
+	LowStockThreshold float64 `gorm:"not null;default:0"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    gorm.DeletedAt `gorm:"index"`

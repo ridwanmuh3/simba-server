@@ -15,6 +15,7 @@ import (
 	"github.com/ridwanmuh3/simba-server/internal/exception"
 	"github.com/ridwanmuh3/simba-server/internal/model"
 	"github.com/ridwanmuh3/simba-server/internal/model/converter"
+	"github.com/ridwanmuh3/simba-server/internal/repository"
 	"github.com/ridwanmuh3/simba-server/internal/util"
 )
 
@@ -34,37 +35,30 @@ func isDuplicateKeyError(err error) (bool, string) {
 }
 
 type InvoiceService struct {
-	db       *gorm.DB
-	log      *zap.SugaredLogger
-	validate *validator.Validate
+	db          *gorm.DB
+	log         *zap.SugaredLogger
+	validate    *validator.Validate
+	invoiceRepo InvoiceRepository
 }
 
-type invoiceHistoryRow struct {
-	ID              uint
-	StockType       string
-	CompanyName     string
-	CompanyContact  string
-	CompanyAddress  string
-	InvoiceNumber   string
-	PONumber        string
-	Kebutuhan       string
-	ReceiverName    string
-	ReceiverAddress string
-	InvoiceDate     string
-	Keterangan      string
-	Penanggungjawab string
-	Jabatan         string
-	BankAccount     string
-	HasItems        bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+type InvoiceRepository interface {
+	FindById(db *gorm.DB, id uint, dapurID uint) (*entity.Invoice, error)
+	FindByIdWithItems(db *gorm.DB, id uint, dapurID uint) (*entity.Invoice, error)
+	FindAll(db *gorm.DB, dapurID uint, searchQuery, startDate, endDate string, page, size int) ([]repository.InvoiceHistoryRow, int64, error)
+	Save(db *gorm.DB, invoice *entity.Invoice) error
+	Delete(db *gorm.DB, id uint, dapurID uint) error
+	SaveItems(db *gorm.DB, items []entity.InvoiceItem) error
+	DeleteItemsByInvoiceID(db *gorm.DB, invoiceID uint) error
 }
 
-func NewInvoiceService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate) *InvoiceService {
+var _ InvoiceRepository = (*repository.InvoiceRepository)(nil)
+
+func NewInvoiceService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, invoiceRepo InvoiceRepository) *InvoiceService {
 	return &InvoiceService{
-		db:       db,
-		log:      logger,
-		validate: validate,
+		db:          db,
+		log:         logger,
+		validate:    validate,
+		invoiceRepo: invoiceRepo,
 	}
 }
 
@@ -171,7 +165,7 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 		}
 	}
 
-	if err := db.Create(&invoice).Error; err != nil {
+	if err := s.invoiceRepo.Save(db, &invoice); err != nil {
 		if ok, msg := isDuplicateKeyError(err); ok {
 			return fiber.NewError(fiber.StatusConflict, msg)
 		}
@@ -185,8 +179,8 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 func (s *InvoiceService) FindInvoiceByID(ctx context.Context, id uint, dapurID uint) (*model.InvoiceData, error) {
 	db := s.db.WithContext(ctx)
 
-	var invoice entity.Invoice
-	if err := db.Preload("Items").Where("id = ? AND dapur_id = ?", id, dapurID).First(&invoice).Error; err != nil {
+	invoice, err := s.invoiceRepo.FindByIdWithItems(db, id, dapurID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
 		}
@@ -239,8 +233,8 @@ func (s *InvoiceService) FindInvoiceByID(ctx context.Context, id uint, dapurID u
 func (s *InvoiceService) FindInvoiceDetail(ctx context.Context, id uint, dapurID uint) (*model.InvoiceDetailResponse, error) {
 	db := s.db.WithContext(ctx)
 
-	var invoice entity.Invoice
-	if err := db.Preload("Items").Where("id = ? AND dapur_id = ?", id, dapurID).First(&invoice).Error; err != nil {
+	invoice, err := s.invoiceRepo.FindByIdWithItems(db, id, dapurID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
 		}
@@ -302,74 +296,14 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 		size = 10
 	}
 
-	query := db.Table("invoices").Where("dapur_id = ?", request.DapurID)
-
-	if request.SearchQuery != "" {
-		search := "%" + request.SearchQuery + "%"
-		query = query.Where(
-			"invoice_number LIKE ? OR company_name LIKE ? OR company_contact LIKE ? OR po_number LIKE ? OR kebutuhan LIKE ?",
-			search, search, search, search, search,
-		)
-	}
-
-	if request.StartDate != "" {
-		parsedFrom, err := time.Parse(time.RFC3339Nano, request.StartDate)
-		if err != nil {
-			s.log.Errorf("failed to parse invoice start date: %v", err)
-			return nil, 0, exception.InternalServerError
-		}
-		query = query.Where("created_at >= ?", parsedFrom.UTC())
-	}
-
-	if request.EndDate != "" {
-		parsedTo, err := time.Parse(time.RFC3339Nano, request.EndDate)
-		if err != nil {
-			s.log.Errorf("failed to parse invoice end date: %v", err)
-			return nil, 0, exception.InternalServerError
-		}
-		query = query.Where("created_at <= ?", parsedTo.UTC())
-	}
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		s.log.Errorf("failed to count invoice records: %v", err)
-		return nil, 0, exception.InternalServerError
-	}
-
-	selectColumns := []string{
-		"invoices.id",
-		"invoices.stock_type",
-		"invoices.company_name",
-		"invoices.company_contact",
-		"invoices.company_address",
-		"invoices.invoice_number",
-		"invoices.po_number",
-		"invoices.kebutuhan",
-		"invoices.receiver_name",
-		"invoices.receiver_address",
-		"invoices.invoice_date",
-		"invoices.keterangan",
-		"invoices.penanggungjawab",
-		"invoices.jabatan",
-		"invoices.bank_account",
-		"invoices.created_at",
-		"invoices.updated_at",
-		"EXISTS (SELECT 1 FROM invoice_items WHERE invoice_items.invoice_id = invoices.id) AS has_items",
-	}
-
-	var invoices []invoiceHistoryRow
-	if err := query.
-		Select(strings.Join(selectColumns, ", ")).
-		Order("invoices.created_at DESC, invoices.id DESC").
-		Offset((page - 1) * size).
-		Limit(size).
-		Scan(&invoices).Error; err != nil {
+	rows, total, err := s.invoiceRepo.FindAll(db, request.DapurID, request.SearchQuery, request.StartDate, request.EndDate, page, size)
+	if err != nil {
 		s.log.Errorf("failed to get invoice records: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
 
-	responses := make([]model.InvoiceResponse, len(invoices))
-	for i, invoice := range invoices {
+	responses := make([]model.InvoiceResponse, len(rows))
+	for i, invoice := range rows {
 		responses[i] = model.InvoiceResponse{
 			ID:              invoice.ID,
 			StockType:       invoice.StockType,
@@ -451,7 +385,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 			}
 			invoice.GrandTotal = grandTotal
 
-			if err := tx.Where("invoice_id = ?", invoice.ID).Delete(&entity.InvoiceItem{}).Error; err != nil {
+			if err := s.invoiceRepo.DeleteItemsByInvoiceID(tx, invoice.ID); err != nil {
 				s.log.Errorf("failed to delete old invoice items %d: %v", invoice.ID, err)
 				return exception.InternalServerError
 			}
@@ -459,11 +393,9 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 				s.log.Errorf("failed to update invoice %d: %v", invoice.ID, err)
 				return exception.InternalServerError
 			}
-			if len(newItems) > 0 {
-				if err := tx.Create(&newItems).Error; err != nil {
-					s.log.Errorf("failed to create new invoice items %d: %v", invoice.ID, err)
-					return exception.InternalServerError
-				}
+			if err := s.invoiceRepo.SaveItems(tx, newItems); err != nil {
+				s.log.Errorf("failed to create new invoice items %d: %v", invoice.ID, err)
+				return exception.InternalServerError
 			}
 			return nil
 		})
@@ -611,11 +543,11 @@ func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint, dapurID uin
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("invoice_id = ?", id).Delete(&entity.InvoiceItem{}).Error; err != nil {
+		if err := s.invoiceRepo.DeleteItemsByInvoiceID(tx, id); err != nil {
 			s.log.Errorf("failed to delete invoice items for invoice %d: %v", id, err)
 			return exception.InternalServerError
 		}
-		if err := tx.Delete(&entity.Invoice{}, "id = ? AND dapur_id = ?", id, dapurID).Error; err != nil {
+		if err := s.invoiceRepo.Delete(tx, id, dapurID); err != nil {
 			s.log.Errorf("failed to delete invoice %d: %v", id, err)
 			return exception.InternalServerError
 		}

@@ -23,18 +23,18 @@ type CreateUserRequest struct {
 	Username string `json:"username" validate:"required,alphanum,min=5,max=30"`
 	Fullname string `json:"fullname" validate:"required,min=2,max=50"`
 	Role     string `json:"role" validate:"required,userrole,min=4,max=20"`
-	Password string `json:"password" validate:"required,min=4,max=30"`
+	Password string `json:"password" validate:"required,strongpassword"`
 }
 
 type UpdateUserRequest struct {
-	ID       int    `json:"-" validate:"required,numeric,min=0"`
+	ID       int    `json:"-" validate:"required,numeric,min=1"`
 	Fullname string `json:"fullname,omitempty" validate:"omitempty,min=2,max=50"`
-	Password string `json:"old_password,omitempty" validate:"omitempty,min=4,max=30"`
+	Password string `json:"old_password,omitempty" validate:"omitempty,strongpassword"`
 }
 
 type DeleteUserRequest struct {
 	AuthID int `json:"-" validate:"required,numeric"`
-	ID     int `json:"id" validate:"required,numeric"`
+	ID     int `param:"id" validate:"required,numeric"`
 }
 
 type FindByIdUserRequest struct {
@@ -43,7 +43,7 @@ type FindByIdUserRequest struct {
 
 type ResetPasswordRequest struct {
 	Username    string `json:"username" validate:"required,alphanum,min=5,max=30"`
-	NewPassword string `json:"new_password" validate:"required,printascii,min=4,max=30"`
+	NewPassword string `json:"new_password" validate:"required,strongpassword"`
 }
 
 type FindAllUserRequest struct {

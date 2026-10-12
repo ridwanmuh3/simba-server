@@ -1,7 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/ridwanmuh3/simba-server/internal/config"
 )
@@ -22,9 +27,29 @@ func main() {
 	})
 
 	appPort := viperConfig.GetInt("APP_PORT")
-	if err := app.Listen(fmt.Sprintf(":%d", appPort)); err != nil {
-		log.Fatalf("failed to start app server: %v", err)
+
+	go func() {
+		if err := app.Listen(fmt.Sprintf(":%d", appPort)); err != nil {
+			log.Fatalf("failed to start app server: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Warn("shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := app.ShutdownWithContext(ctx); err != nil {
+		log.Fatalf("server forced to shutdown: %v", err)
 	}
 
-	defer log.Sync()
+	log.Info("server exiting")
+
+	if err := log.Sync(); err != nil {
+		return
+	}
 }

@@ -21,10 +21,16 @@ import (
 )
 
 type StockService struct {
-	db             *gorm.DB
-	log            *zap.SugaredLogger
-	validate       *validator.Validate
-	itemRepository StockRepository
+	db              *gorm.DB
+	log             *zap.SugaredLogger
+	validate        *validator.Validate
+	itemRepository  StockRepository
+	activityEmitter ActivityEmitterIntf
+	lowStockChecker *LowStockChecker
+}
+
+type ActivityEmitterIntf interface {
+	Emit(log *entity.ActivityLog)
 }
 
 type StockRepository interface {
@@ -35,12 +41,14 @@ type StockRepository interface {
 
 var _ StockRepository = (*repository.ItemRepository)(nil)
 
-func NewStockService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, itemRepository StockRepository) *StockService {
+func NewStockService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, itemRepository StockRepository, activityEmitter ActivityEmitterIntf, lowStockChecker *LowStockChecker) *StockService {
 	return &StockService{
-		db:             db,
-		log:            logger,
-		validate:       validate,
-		itemRepository: itemRepository,
+		db:              db,
+		log:             logger,
+		validate:        validate,
+		itemRepository:  itemRepository,
+		activityEmitter: activityEmitter,
+		lowStockChecker: lowStockChecker,
 	}
 }
 
@@ -172,26 +180,21 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		return nil, exception.InternalServerError
 	}
 
-	// 8. ACTIVITY
-	if err := tx.Create(&entity.ActivityLog{
-		Type:  "UPDATE-STOCK",
-		Title: "Stok bahan diperbarui",
-		Description: fmt.Sprintf(
-			"%s: %.2f → %.2f %s",
-			item.Name,
-			tr.PreviousStock,
-			tr.NewStock,
-			item.MeasureUnit,
-		),
-		ActionBy: request.ModifiedBy,
-		DapurID:  request.DapurID,
-	}).Error; err != nil {
+	// 8. COMMIT
+	if err := tx.Commit().Error; err != nil {
 		return nil, exception.InternalServerError
 	}
 
-	// 9. COMMIT
-	if err := tx.Commit().Error; err != nil {
-		return nil, exception.InternalServerError
+	// 9. ASYNC: emit activity + check low stock
+	s.activityEmitter.Emit(&entity.ActivityLog{
+		Type:        "UPDATE-STOCK",
+		Title:       "Stok bahan diperbarui",
+		Description: fmt.Sprintf("%s: %.2f → %.2f %s", item.Name, tr.PreviousStock, tr.NewStock, item.MeasureUnit),
+		ActionBy:    request.ModifiedBy,
+		DapurID:     request.DapurID,
+	})
+	if s.lowStockChecker != nil {
+		s.lowStockChecker.Check(item, request.DapurID)
 	}
 
 	return converter.StockToResponse(tr), nil
@@ -241,88 +244,14 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 		return nil, exception.InternalServerError
 	}
 
-	// 4. GET ALL TRACKING IN ORDER — scoped to dapur
-	var tracks []entity.StockTracking
-	if err := tx.
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("item_id = ? AND dapur_id = ?", item.ID, request.DapurID).
-		Order("created_at ASC, id ASC").
-		Find(&tracks).Error; err != nil {
+	// 4. REBUILD MAC
+	tracks, runningStock, totalPrice, err := util.RecalculateMAC(tx, item, request.DapurID)
+	if err != nil {
+		s.log.Errorf("failed to recalculate MAC: %v", err)
 		return nil, exception.InternalServerError
 	}
 
-	// 5. REBUILD MAC
-	var runningStock float64 = item.InitialStock
-	var totalPrice float64 = util.Round2(item.InitialStock * item.UnitPrice)
-
-	var updatedTarget *entity.StockTracking
-
-	for i := range tracks {
-		prev := runningStock
-		tracks[i].PreviousStock = util.Round4(prev)
-
-		switch tracks[i].Type {
-
-		case "IN":
-			added := util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
-
-			runningStock = util.Round4(prev + tracks[i].Amount)
-			totalPrice = util.Round2(totalPrice + added)
-
-			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
-			tracks[i].NewStock = runningStock
-
-		case "OUT":
-			amount := tracks[i].Amount
-
-			if amount > prev {
-				amount = prev
-			}
-
-			var avg float64
-			if prev > 0 {
-				avg = util.Round4(totalPrice / prev)
-			} else {
-				avg = 0
-			}
-
-			deduction := util.Round2(avg * amount)
-			lineTotal := util.Round2(amount * tracks[i].UnitPrice)
-
-			runningStock = util.Round4(prev - amount)
-			if runningStock < 0 {
-				runningStock = 0
-			}
-
-			totalPrice = util.Round2(totalPrice - deduction)
-			if totalPrice < 0 {
-				totalPrice = 0
-			}
-
-			tracks[i].TotalPrice = lineTotal
-			tracks[i].NewStock = runningStock
-		}
-
-		if tracks[i].ID == uint(request.StockID) {
-			t := tracks[i]
-			updatedTarget = &t
-		}
-	}
-
-	// 6. UPDATE ALL TRACKING
-	for i := range tracks {
-		if err := tx.Model(&entity.StockTracking{}).
-			Where("id = ?", tracks[i].ID).
-			UpdateColumns(map[string]any{
-				"previous_stock": tracks[i].PreviousStock,
-				"new_stock":      tracks[i].NewStock,
-				"total_price":    tracks[i].TotalPrice,
-			}).Error; err != nil {
-			return nil, exception.InternalServerError
-		}
-	}
-
-	// 7. UPDATE ITEM
+	// 5. UPDATE ITEM
 	item.Stock = util.Round4(runningStock)
 	item.TotalPrice = util.Round2(totalPrice)
 
@@ -330,28 +259,29 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 		return nil, exception.InternalServerError
 	}
 
-	// 8. ACTIVITY LOG
-	if err := tx.Create(&entity.ActivityLog{
-		Type:  "EDIT-STOCK-" + stock.Type,
-		Title: "Stock entry edited and chain recalculated",
-		Description: fmt.Sprintf(
-			"%s [%s]: %.2f @ %.2f → stock %.2f %s",
-			item.Name,
-			stock.Type,
-			request.Amount,
-			request.UnitPrice,
-			item.Stock,
-			item.MeasureUnit,
-		),
-		ActionBy: request.ModifiedBy,
-		DapurID:  request.DapurID,
-	}).Error; err != nil {
+	// 6. COMMIT
+	if err := tx.Commit().Error; err != nil {
 		return nil, exception.InternalServerError
 	}
 
-	// 9. COMMIT
-	if err := tx.Commit().Error; err != nil {
-		return nil, exception.InternalServerError
+	// 7. ASYNC: emit activity + check low stock
+	s.activityEmitter.Emit(&entity.ActivityLog{
+		Type:        "EDIT-STOCK-" + stock.Type,
+		Title:       "Stock entry edited and chain recalculated",
+		Description: fmt.Sprintf("%s [%s]: %.2f @ %.2f %s", item.Name, stock.Type, request.Amount, request.UnitPrice, item.MeasureUnit),
+		ActionBy:    request.ModifiedBy,
+		DapurID:     request.DapurID,
+	})
+	if s.lowStockChecker != nil {
+		s.lowStockChecker.Check(item, request.DapurID)
+	}
+
+	var updatedTarget *entity.StockTracking
+	for i := range tracks {
+		if tracks[i].ID == uint(request.StockID) {
+			t := tracks[i]
+			updatedTarget = &t
+		}
 	}
 
 	if updatedTarget == nil {
@@ -395,81 +325,14 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 		return false, exception.InternalServerError
 	}
 
-	// 5. GET ALL REMAINING TRACKING — scoped to dapur
-	var tracks []entity.StockTracking
-	if err := tx.
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("item_id = ? AND dapur_id = ?", item.ID, request.DapurID).
-		Order("created_at ASC, id ASC").
-		Find(&tracks).Error; err != nil {
+	// 5. REBUILD MAC
+	_, runningStock, totalPrice, err := util.RecalculateMAC(tx, item, request.DapurID)
+	if err != nil {
+		s.log.Errorf("failed to recalculate MAC after delete: %v", err)
 		return false, exception.InternalServerError
 	}
 
-	// 6. REBUILD MAC
-	var runningStock float64 = item.InitialStock
-	var totalPrice float64 = util.Round2(item.InitialStock * item.UnitPrice)
-
-	for i := range tracks {
-
-		prev := runningStock
-		tracks[i].PreviousStock = util.Round4(prev)
-
-		switch tracks[i].Type {
-		case "IN":
-			added := util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
-
-			runningStock = util.Round4(prev + tracks[i].Amount)
-			totalPrice = util.Round2(totalPrice + added)
-
-			tracks[i].TotalPrice = util.Round2(tracks[i].Amount * tracks[i].UnitPrice)
-			tracks[i].NewStock = runningStock
-
-		case "OUT":
-			amount := tracks[i].Amount
-
-			if amount > prev {
-				amount = prev
-			}
-
-			var avg float64
-			if prev > 0 {
-				avg = util.Round4(totalPrice / prev)
-			} else {
-				avg = 0
-			}
-
-			deduction := util.Round2(avg * amount)
-			lineTotal := util.Round2(amount * tracks[i].UnitPrice)
-
-			runningStock = util.Round4(prev - amount)
-			if runningStock < 0 {
-				runningStock = 0
-			}
-
-			totalPrice = util.Round2(totalPrice - deduction)
-			if totalPrice < 0 {
-				totalPrice = 0
-			}
-
-			tracks[i].TotalPrice = lineTotal
-			tracks[i].NewStock = runningStock
-		}
-	}
-
-	// 7. UPDATE TRACKING (CHAIN FIX)
-	for i := range tracks {
-		if err := tx.Model(&entity.StockTracking{}).
-			Where("id = ?", tracks[i].ID).
-			UpdateColumns(map[string]any{
-				"previous_stock": tracks[i].PreviousStock,
-				"new_stock":      tracks[i].NewStock,
-				"total_price":    tracks[i].TotalPrice,
-			}).Error; err != nil {
-			return false, exception.InternalServerError
-		}
-	}
-
-	// 8. UPDATE ITEM
+	// 6. UPDATE ITEM
 	item.Stock = util.Round4(runningStock)
 	item.TotalPrice = util.Round2(totalPrice)
 
@@ -477,33 +340,25 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 		return false, exception.InternalServerError
 	}
 
-	// 9. ACTIVITY LOG
+	// 6. COMMIT
+	if err := tx.Commit().Error; err != nil {
+		return false, exception.InternalServerError
+	}
+
+	// 7. ASYNC: emit activity
 	action := "DELETE-STOCK"
 	if stock.Type == "IN" {
 		action = "DELETE-STOCK-IN"
 	} else {
 		action = "DELETE-STOCK-OUT"
 	}
-
-	if err := tx.Create(&entity.ActivityLog{
-		Type:  action,
-		Title: "Stock recalculated after delete",
-		Description: fmt.Sprintf(
-			"%s: %.2f %s",
-			item.Name,
-			item.Stock,
-			item.MeasureUnit,
-		),
-		ActionBy: request.ModifiedBy,
-		DapurID:  request.DapurID,
-	}).Error; err != nil {
-		return false, exception.InternalServerError
-	}
-
-	// 10. COMMIT
-	if err := tx.Commit().Error; err != nil {
-		return false, exception.InternalServerError
-	}
+	s.activityEmitter.Emit(&entity.ActivityLog{
+		Type:        action,
+		Title:       "Stock recalculated after delete",
+		Description: fmt.Sprintf("%s: %.2f %s", item.Name, item.Stock, item.MeasureUnit),
+		ActionBy:    request.ModifiedBy,
+		DapurID:     request.DapurID,
+	})
 
 	return true, nil
 }

@@ -8,9 +8,9 @@ Dokumen ini berisi daftar pembaruan sistem yang direncanakan, dikategorikan berd
 
 ### Security Hardening
 
-- [ ] **Rate Limiting pada Auth Endpoints** — Tambahkan rate limiter (misal: 5 request/menit) pada `/api/auth/login` untuk mencegah brute-force attack
-- [ ] **CSRF Token Protection** — Implementasikan CSRF token pada semua state-changing request (POST/PUT/DELETE) menggunakan Fiber CSRF middleware
-- [ ] **Password Complexity Rules** — Tambahkan validasi kompleksitas password (minimal 1 huruf besar, 1 angka, 1 karakter spesial, minimum 8 karakter)
+- [x] **Rate Limiting pada Auth Endpoints** — Tambahkan rate limiter (misal: 5 request/menit) pada `/api/auth/login` untuk mencegah brute-force attack
+- [x] **CSRF Token Protection** — Implementasikan CSRF token pada semua state-changing request (POST/PUT/DELETE)
+- [x] **Password Complexity Rules** — Tambahkan validasi kompleksitas password (minimal 1 huruf besar, 1 angka, 1 karakter spesial, minimum 8 karakter)
 - [x] **Token TTL & Rotation** — Implementasikan expiry time pada token di database, bukan hanya di cookie. Tambahkan mekanisme token refresh otomatis
 
 ### Data & Validation
@@ -107,9 +107,9 @@ Dokumen ini berisi daftar pembaruan sistem yang direncanakan, dikategorikan berd
 
 | Priority | Update                  | Category | Impact       |
 | -------- | ----------------------- | -------- | ------------ |
-| P0       | Rate Limiting Auth      | Minor    | Security     |
-| P0       | CSRF Protection         | Minor    | Security     |
-| P0       | Password Complexity     | Minor    | Security     |
+| Done     | Rate Limiting Auth      | Minor    | Security     |
+| Done     | CSRF Protection         | Minor    | Security     |
+| Done     | Password Complexity     | Minor    | Security     |
 | P0       | Token TTL               | Minor    | Security     |
 | P1       | Full Audit Trail        | Major    | Compliance   |
 | P1       | Laporan Keuangan PDF    | Major    | Business     |

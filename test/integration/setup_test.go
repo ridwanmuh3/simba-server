@@ -31,10 +31,10 @@ const (
 	testDapurName          = "Dapur Test Utama"
 	testDapurDescription   = "Dapur default untuk integration test"
 	testSuperAdminUsername = "supertestadmin"
-	testSuperAdminPassword = "supertestpass"
+	testSuperAdminPassword = "Supertest1!"
 	testSuperAdminFullname = "Super Test Admin"
 	testAdminUsername      = "admintest01"
-	testAdminPassword      = "admintestpass"
+	testAdminPassword      = "Admintest1!"
 	testAdminFullname      = "Admin Test One"
 )
 
@@ -112,6 +112,9 @@ func setupApp() {
 	if err := validate.RegisterValidation("userrole", util.ValidateUserRole); err != nil {
 		panic("failed to register userrole validator: " + err.Error())
 	}
+	if err := validate.RegisterValidation("strongpassword", util.ValidateStrongPassword); err != nil {
+		panic("failed to register strongpassword validator: " + err.Error())
+	}
 
 	testApp = config.NewFiber(v)
 	config.Bootstrap(&config.BootstrapConfig{
@@ -145,6 +148,7 @@ func seedTestUsers() {
 	userRepo := repository.NewUserRepository()
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	_ = validate.RegisterValidation("userrole", util.ValidateUserRole)
+	_ = validate.RegisterValidation("strongpassword", util.ValidateStrongPassword)
 	userSvc := service.NewUserService(testDB, testLog, validate, userRepo)
 
 	ctx := context.Background()
@@ -169,6 +173,7 @@ func mustLoginUser(username, password string) []*http.Cookie {
 	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	addCSRF(req, nil)
 
 	resp, err := testApp.Test(req, -1)
 	if err != nil {
@@ -179,6 +184,53 @@ func mustLoginUser(username, password string) []*http.Cookie {
 		panic(fmt.Sprintf("login failed status=%d body=%s", resp.StatusCode, b))
 	}
 	return resp.Cookies()
+}
+
+func isUnsafeMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func addCSRF(req *http.Request, cookies []*http.Cookie) {
+	if !isUnsafeMethod(req.Method) {
+		return
+	}
+
+	token, csrfCookie := getCSRFToken(cookies)
+	req.Header.Set("X-Csrf-Token", token)
+	if csrfCookie != nil {
+		req.AddCookie(csrfCookie)
+	}
+}
+
+func getCSRFToken(cookies []*http.Cookie) (string, *http.Cookie) {
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/csrf", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+
+	resp, err := testApp.Test(req, -1)
+	if err != nil {
+		panic(fmt.Sprintf("csrf request error: %v", err))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		panic(fmt.Sprintf("csrf failed status=%d body=%s", resp.StatusCode, body))
+	}
+
+	for _, c := range resp.Cookies() {
+		if c.Name == "csrf_" && c.Value != "" {
+			return c.Value, c
+		}
+	}
+
+	panic("csrf cookie not returned")
 }
 
 func getEnvOrDefault(key, fallback string) string {
@@ -207,6 +259,37 @@ func parseResp(resp *http.Response) testResp {
 
 // doJSON sends a JSON request and returns the raw *http.Response.
 func doJSON(method, path string, body any, cookies []*http.Cookie, headers ...map[string]string) *http.Response {
+	var reqBody io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		reqBody = bytes.NewBuffer(b)
+	}
+
+	req := httptest.NewRequest(method, path, reqBody)
+	req.Header.Set("Content-Type", "application/json")
+
+	if len(headers) > 0 {
+		for k, v := range headers[0] {
+			req.Header.Set(k, v)
+		}
+	}
+
+	for _, c := range cookies {
+		if isUnsafeMethod(method) && c.Name == "csrf_" {
+			continue
+		}
+		req.AddCookie(c)
+	}
+	addCSRF(req, cookies)
+
+	resp, err := testApp.Test(req, -1)
+	if err != nil {
+		panic(fmt.Sprintf("test request error: %v", err))
+	}
+	return resp
+}
+
+func doJSONWithoutCSRF(method, path string, body any, cookies []*http.Cookie, headers ...map[string]string) *http.Response {
 	var reqBody io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -255,8 +338,12 @@ func doMultipart(method, path string, fields map[string]string, fileField, fileN
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	for _, c := range cookies {
+		if isUnsafeMethod(method) && c.Name == "csrf_" {
+			continue
+		}
 		req.AddCookie(c)
 	}
+	addCSRF(req, cookies)
 
 	resp, err := testApp.Test(req, -1)
 	if err != nil {

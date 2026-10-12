@@ -16,6 +16,12 @@ type UserHandler struct {
 	resetSecret string
 	log         *zap.SugaredLogger
 	userService UserService
+	rateLimiter RateLimiter
+}
+
+type RateLimiter interface {
+	Record(key string) (string, bool)
+	ForgetSuccessful(key string)
 }
 
 type UserService interface {
@@ -34,11 +40,12 @@ type UserService interface {
 
 var _ UserService = (*service.UserService)(nil)
 
-func NewUserHandler(resetSecret string, logger *zap.SugaredLogger, userService UserService) *UserHandler {
+func NewUserHandler(resetSecret string, logger *zap.SugaredLogger, userService UserService, rateLimiter RateLimiter) *UserHandler {
 	return &UserHandler{
 		resetSecret: resetSecret,
 		log:         logger,
 		userService: userService,
+		rateLimiter: rateLimiter,
 	}
 }
 
