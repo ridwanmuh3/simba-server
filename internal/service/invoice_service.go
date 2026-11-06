@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -124,8 +125,60 @@ func (s *InvoiceService) GetInvoiceItems(ctx context.Context, request *model.Get
 	}, nil
 }
 
+const docSeqLockKeyBase = int64(7291000)
+
 func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.GenerateInvoiceRequest, summary *model.InvoiceSummary) error {
-	db := s.db.WithContext(ctx)
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", docSeqLockKeyBase+int64(request.DapurID)).Error; err != nil {
+		s.log.Errorf("failed to acquire document sequence lock: %v", err)
+		return exception.InternalServerError
+	}
+
+	invCur, hasInv := readSeqFrom(tx, KeySeqInvoice, request.DapurID)
+	poCur, hasPo := readSeqFrom(tx, KeySeqPO, request.DapurID)
+
+	var invBase, poBase int
+	if hasInv {
+		invBase = invCur
+	}
+	if hasPo {
+		poBase = poCur
+	}
+	if !hasInv || !hasPo {
+		maxInv, maxPo, err := getDocumentSequenceMaxFrom(tx, request.DapurID)
+		if err != nil {
+			return err
+		}
+		if !hasInv {
+			invBase = maxInv
+		}
+		if !hasPo {
+			poBase = maxPo
+		}
+	}
+
+	invNo := strings.TrimSpace(request.InvoiceNo)
+	poNo := strings.TrimSpace(request.PONo)
+	invGenerated := false
+	poGenerated := false
+
+	if invNo == "" {
+		invSeq := invBase + 1
+		invNo = fmt.Sprintf("INV-%03d", invSeq)
+		invGenerated = true
+	}
+	if poNo == "" {
+		poSeq := poBase + 1
+		poNo = fmt.Sprintf("PO-%03d", poSeq)
+		poGenerated = true
+	}
+
+	invSeq, invOK := parseDocumentSequence(invNo, "INV")
+	poSeq, poOK := parseDocumentSequence(poNo, "PO")
+	invBump := invGenerated || (invOK && invSeq == invBase+1)
+	poBump := poGenerated || (poOK && poSeq == poBase+1)
 
 	invoice := entity.Invoice{
 		DapurID:         request.DapurID,
@@ -133,8 +186,8 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 		CompanyName:     request.CompanyName,
 		CompanyContact:  request.CompanyContact,
 		CompanyAddress:  request.CompanyAddress,
-		InvoiceNumber:   request.InvoiceNo,
-		PONumber:        request.PONo,
+		InvoiceNumber:   invNo,
+		PONumber:        poNo,
 		Kebutuhan:       request.Kebutuhan,
 		ReceiverName:    request.ReceiverName,
 		ReceiverAddress: request.ReceiverAddress,
@@ -166,11 +219,32 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 		}
 	}
 
-	if err := s.invoiceRepo.Save(db, &invoice); err != nil {
+	if err := s.invoiceRepo.Save(tx, &invoice); err != nil {
 		if ok, msg := isDuplicateKeyError(err); ok {
 			return fiber.NewError(fiber.StatusConflict, msg)
 		}
 		s.log.Errorf("failed to save invoice record: %v", err)
+		return exception.InternalServerError
+	}
+
+	if invBump {
+		if err := upsertSeqTo(tx, KeySeqInvoice, request.DapurID, invSeq); err != nil {
+			s.log.Errorf("failed to bump invoice seq: %v", err)
+			return exception.InternalServerError
+		}
+	}
+	if poBump {
+		if err := upsertSeqTo(tx, KeySeqPO, request.DapurID, poSeq); err != nil {
+			s.log.Errorf("failed to bump po seq: %v", err)
+			return exception.InternalServerError
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		if ok, msg := isDuplicateKeyError(err); ok {
+			return fiber.NewError(fiber.StatusConflict, msg)
+		}
+		s.log.Errorf("failed to commit invoice save: %v", err)
 		return exception.InternalServerError
 	}
 

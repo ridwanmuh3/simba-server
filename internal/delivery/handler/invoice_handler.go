@@ -38,7 +38,6 @@ type InvoiceService interface {
 type InvoiceSettingService interface {
 	GetCompanyProfile(ctx context.Context, dapurID uint) (*model.CompanyProfileResponse, error)
 	GetNextDocumentNumbers(ctx context.Context, dapurID uint) (*model.DocumentSequenceResponse, error)
-	ConsumeDocumentNumbers(ctx context.Context, dapurID uint) error
 }
 
 var (
@@ -138,11 +137,6 @@ func (h *InvoiceHandler) GetInvoiceItems(c *fiber.Ctx) error {
 
 	if err := h.invoiceService.SaveInvoice(c.Context(), request, summary); err != nil {
 		h.log.Warnf("failed to save invoice record: %v", err)
-		return err
-	}
-
-	if err := h.settingService.ConsumeDocumentNumbers(c.Context(), dapurID); err != nil {
-		h.log.Warnf("failed to consume document numbers: %v", err)
 		return err
 	}
 
