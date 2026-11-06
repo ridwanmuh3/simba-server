@@ -10,6 +10,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/exception"
@@ -330,10 +331,13 @@ func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.Fin
 }
 
 func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.UpdateInvoiceRequest) error {
-	db := s.db.WithContext(ctx)
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
 
 	var invoice entity.Invoice
-	if err := db.Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).First(&invoice).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).
+		First(&invoice).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
 		}
@@ -353,56 +357,63 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 	invoice.BankAccount = request.BankAccount
 
 	if len(request.StockIDs) > 0 {
-		return db.Transaction(func(tx *gorm.DB) error {
-			var stocks []entity.StockTracking
-			if err := tx.Preload("Item").
-				Where("id IN ? AND dapur_id = ?", request.StockIDs, request.DapurID).
-				Find(&stocks).Error; err != nil {
-				s.log.Errorf("failed to fetch stocks for invoice update %d: %v", request.ID, err)
-				return exception.InternalServerError
-			}
+		var stocks []entity.StockTracking
+		if err := tx.Preload("Item").
+			Where("id IN ? AND dapur_id = ?", request.StockIDs, request.DapurID).
+			Find(&stocks).Error; err != nil {
+			s.log.Errorf("failed to fetch stocks for invoice update %d: %v", request.ID, err)
+			return exception.InternalServerError
+		}
 
-			var grandTotal float64
-			newItems := make([]entity.InvoiceItem, len(stocks))
-			for i, stock := range stocks {
-				lineTotal := util.Round2(stock.Amount * stock.UnitPrice)
-				grandTotal = util.Round2(grandTotal + lineTotal)
-				newItems[i] = entity.InvoiceItem{
-					InvoiceID:     invoice.ID,
-					ItemID:        stock.Item.ID,
-					ItemName:      stock.Item.Name,
-					Category:      stock.Item.Category,
-					MeasureUnit:   stock.Item.MeasureUnit,
-					Amount:        stock.Amount,
-					UnitPrice:     stock.UnitPrice,
-					TotalPrice:    lineTotal,
-					PreviousStock: stock.PreviousStock,
-					NewStock:      stock.NewStock,
-					Supplier:      stock.Supplier,
-					StockType:     stock.Type,
-					CreatedAt:     stock.CreatedAt,
-				}
+		var grandTotal float64
+		newItems := make([]entity.InvoiceItem, len(stocks))
+		for i, stock := range stocks {
+			lineTotal := util.Round2(stock.Amount * stock.UnitPrice)
+			grandTotal = util.Round2(grandTotal + lineTotal)
+			newItems[i] = entity.InvoiceItem{
+				InvoiceID:     invoice.ID,
+				ItemID:        stock.Item.ID,
+				ItemName:      stock.Item.Name,
+				Category:      stock.Item.Category,
+				MeasureUnit:   stock.Item.MeasureUnit,
+				Amount:        stock.Amount,
+				UnitPrice:     stock.UnitPrice,
+				TotalPrice:    lineTotal,
+				PreviousStock: stock.PreviousStock,
+				NewStock:      stock.NewStock,
+				Supplier:      stock.Supplier,
+				StockType:     stock.Type,
+				CreatedAt:     stock.CreatedAt,
 			}
-			invoice.GrandTotal = grandTotal
+		}
+		invoice.GrandTotal = grandTotal
 
-			if err := s.invoiceRepo.DeleteItemsByInvoiceID(tx, invoice.ID); err != nil {
-				s.log.Errorf("failed to delete old invoice items %d: %v", invoice.ID, err)
-				return exception.InternalServerError
-			}
-			if err := tx.Save(&invoice).Error; err != nil {
-				s.log.Errorf("failed to update invoice %d: %v", invoice.ID, err)
-				return exception.InternalServerError
-			}
-			if err := s.invoiceRepo.SaveItems(tx, newItems); err != nil {
-				s.log.Errorf("failed to create new invoice items %d: %v", invoice.ID, err)
-				return exception.InternalServerError
-			}
-			return nil
-		})
+		if err := s.invoiceRepo.DeleteItemsByInvoiceID(tx, invoice.ID); err != nil {
+			s.log.Errorf("failed to delete old invoice items %d: %v", invoice.ID, err)
+			return exception.InternalServerError
+		}
+		if err := tx.Save(&invoice).Error; err != nil {
+			s.log.Errorf("failed to update invoice %d: %v", invoice.ID, err)
+			return exception.InternalServerError
+		}
+		if err := s.invoiceRepo.SaveItems(tx, newItems); err != nil {
+			s.log.Errorf("failed to create new invoice items %d: %v", invoice.ID, err)
+			return exception.InternalServerError
+		}
+		if err := tx.Commit().Error; err != nil {
+			s.log.Errorf("failed to commit invoice update %d: %v", invoice.ID, err)
+			return exception.InternalServerError
+		}
+		return nil
 	}
 
-	if err := db.Save(&invoice).Error; err != nil {
+	if err := tx.Save(&invoice).Error; err != nil {
 		s.log.Errorf("failed to update invoice %d: %v", request.ID, err)
+		return exception.InternalServerError
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		s.log.Errorf("failed to commit invoice update %d: %v", request.ID, err)
 		return exception.InternalServerError
 	}
 
@@ -529,28 +540,33 @@ func (s *InvoiceService) GetInvoiceItemsFlat(ctx context.Context, req *model.Get
 }
 
 func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint, dapurID uint) error {
-	db := s.db.WithContext(ctx)
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
 
-	var count int64
-	if err := db.Model(&entity.Invoice{}).
+	var invoice entity.Invoice
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id = ? AND dapur_id = ?", id, dapurID).
-		Count(&count).Error; err != nil {
-		s.log.Errorf("failed to check invoice %d: %v", id, err)
+		First(&invoice).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
+		}
+		s.log.Errorf("failed to find invoice %d: %v", id, err)
 		return exception.InternalServerError
 	}
-	if count == 0 {
-		return fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
+
+	if err := s.invoiceRepo.DeleteItemsByInvoiceID(tx, id); err != nil {
+		s.log.Errorf("failed to delete invoice items for invoice %d: %v", id, err)
+		return exception.InternalServerError
+	}
+	if err := s.invoiceRepo.Delete(tx, id, dapurID); err != nil {
+		s.log.Errorf("failed to delete invoice %d: %v", id, err)
+		return exception.InternalServerError
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
-		if err := s.invoiceRepo.DeleteItemsByInvoiceID(tx, id); err != nil {
-			s.log.Errorf("failed to delete invoice items for invoice %d: %v", id, err)
-			return exception.InternalServerError
-		}
-		if err := s.invoiceRepo.Delete(tx, id, dapurID); err != nil {
-			s.log.Errorf("failed to delete invoice %d: %v", id, err)
-			return exception.InternalServerError
-		}
-		return nil
-	})
+	if err := tx.Commit().Error; err != nil {
+		s.log.Errorf("failed to commit invoice delete %d: %v", id, err)
+		return exception.InternalServerError
+	}
+
+	return nil
 }

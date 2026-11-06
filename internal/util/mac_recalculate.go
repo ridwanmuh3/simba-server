@@ -6,6 +6,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
+	"github.com/ridwanmuh3/simba-server/internal/exception"
 )
 
 // RecalculateMAC rebuilds the running MAC (Merger-Average-Cost) chain for an item
@@ -15,6 +16,7 @@ import (
 //
 // Returns the final stock and total_price values for the item, plus the
 // updated tracks slice so callers can inspect individual rows.
+// If an OUT movement would result in negative stock, it returns InsufficientStockError.
 func RecalculateMAC(tx *gorm.DB, item *entity.Item, dapurID uint) (tracks []entity.StockTracking, finalStock, finalTotalPrice float64, err error) {
 	if err = tx.
 		Where("item_id = ? AND dapur_id = ? AND deleted_at IS NULL", item.ID, dapurID).
@@ -39,20 +41,18 @@ func RecalculateMAC(tx *gorm.DB, item *entity.Item, dapurID uint) (tracks []enti
 		case "OUT":
 			amount := tracks[i].Amount
 			if amount > runningStock {
-				amount = runningStock
+				return nil, 0, 0, exception.InsufficientStockError
 			}
 
 			var avg float64
 			if runningStock > 0 {
 				avg = Round4(totalPrice / runningStock)
+			} else {
+				avg = 0
 			}
 
 			deduction := Round2(avg * amount)
 			runningStock = Round4(runningStock - amount)
-			if runningStock < 0 {
-				runningStock = 0
-			}
-
 			totalPrice = Round2(totalPrice - deduction)
 			if totalPrice < 0 {
 				totalPrice = 0

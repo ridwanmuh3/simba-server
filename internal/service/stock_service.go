@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -53,9 +52,6 @@ func NewStockService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator
 }
 
 func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateItemStockRequest) (*model.StockResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
-
 	// 1. VALIDATION
 	if err := s.validate.Struct(request); err != nil {
 		return nil, err
@@ -67,6 +63,9 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		request.Supplier = "-"
 	}
 
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+
 	// 2. LOCK ITEM — scoped to dapur
 	item := new(entity.Item)
 	if err := tx.
@@ -76,26 +75,10 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		return nil, exception.ItemNotFoundError
 	}
 
-	// 3. GET LAST TRACKING (DETERMINISTIC) — scoped to dapur
-	var last entity.StockTracking
-	err := tx.
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("item_id = ? AND dapur_id = ? AND deleted_at IS NULL", item.ID, request.DapurID).
-		Order("created_at DESC, id DESC").
-		First(&last).Error
-
-	var previousStock float64
-	var currentTotalPrice float64
-
-	if err == nil {
-		previousStock = last.NewStock
-		currentTotalPrice = item.TotalPrice
-	} else if errors.Is(err, gorm.ErrRecordNotFound) {
-		previousStock = item.Stock
-		currentTotalPrice = item.TotalPrice
-	} else {
-		return nil, exception.InternalServerError
-	}
+	// 3. SINGLE SOURCE OF TRUTH: item.Stock / item.TotalPrice
+	// Lock item above already serializes mutations for this item.
+	previousStock := item.Stock
+	currentTotalPrice := item.TotalPrice
 
 	// 4. INIT TRACKING
 	tr := &entity.StockTracking{
@@ -140,9 +123,6 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 		}
 
 		newStock := util.Round4(previousStock - amount)
-		if newStock < 0 {
-			newStock = 0
-		}
 
 		deduction := util.Round2(avg * amount)
 		lineTotal := util.Round2(amount * request.UnitPrice)
@@ -160,13 +140,6 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 
 	default:
 		return nil, fiber.NewError(fiber.StatusBadRequest, "invalid stock type")
-	}
-
-	if tr.NewStock < 0 {
-		tr.NewStock = 0
-	}
-	if item.Stock < 0 {
-		item.Stock = 0
 	}
 
 	// 6. SAVE ITEM
@@ -200,9 +173,6 @@ func (s *StockService) UpdateStock(ctx context.Context, request *model.UpdateIte
 }
 
 func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRequest) (*model.StockResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
-
 	// 1. VALIDATION
 	if err := s.validate.Struct(request); err != nil {
 		return nil, err
@@ -210,6 +180,9 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 	if request.Supplier == "" {
 		request.Supplier = "-"
 	}
+
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
 
 	// 2. LOCK ITEM — scoped to dapur
 	item := new(entity.Item)
@@ -247,6 +220,9 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 	tracks, runningStock, totalPrice, err := util.RecalculateMAC(tx, item, request.DapurID)
 	if err != nil {
 		s.log.Errorf("failed to recalculate MAC: %v", err)
+		if err == exception.InsufficientStockError {
+			return nil, err
+		}
 		return nil, exception.InternalServerError
 	}
 
@@ -291,13 +267,13 @@ func (s *StockService) EditStock(ctx context.Context, request *model.EditStockRe
 }
 
 func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteStockRequest) (bool, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
-
 	// 1. VALIDATION
 	if err := s.validate.Struct(request); err != nil {
 		return false, err
 	}
+
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
 
 	// 2. LOCK ITEM — scoped to dapur
 	item := new(entity.Item)
@@ -328,6 +304,9 @@ func (s *StockService) DeleteStock(ctx context.Context, request *model.DeleteSto
 	_, runningStock, totalPrice, err := util.RecalculateMAC(tx, item, request.DapurID)
 	if err != nil {
 		s.log.Errorf("failed to recalculate MAC after delete: %v", err)
+		if err == exception.InsufficientStockError {
+			return false, err
+		}
 		return false, exception.InternalServerError
 	}
 

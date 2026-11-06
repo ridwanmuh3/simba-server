@@ -207,13 +207,13 @@ func (s *ItemService) AddBatches(ctx context.Context, request *model.AddItemBatc
 }
 
 func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemRequest) (*model.ItemResponse, error) {
-	tx := s.db.WithContext(ctx).Begin()
-	defer tx.Rollback()
-
 	if err := s.validate.Struct(request); err != nil {
 		s.log.Errorf("failed to validate request body: %v", err)
 		return nil, err
 	}
+
+	tx := s.db.WithContext(ctx).Begin()
+	defer tx.Rollback()
 
 	item := new(entity.Item)
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -239,6 +239,9 @@ func (s *ItemService) Update(ctx context.Context, request *model.UpdateItemReque
 	_, finalStock, finalTotalPrice, err := util.RecalculateMAC(tx, item, request.DapurID)
 	if err != nil {
 		s.log.Errorf("failed to recalculate MAC: %v", err)
+		if err == exception.InsufficientStockError {
+			return nil, err
+		}
 		return nil, exception.InternalServerError
 	}
 

@@ -27,7 +27,6 @@ type SettingService struct {
 type SettingRepository interface {
 	GetByKey(db *gorm.DB, key string, dapurID uint) (*entity.AppSetting, error)
 	Save(db *gorm.DB, setting *entity.AppSetting) error
-	IncrementSequence(db *gorm.DB, key string, dapurID uint) (int, error)
 }
 
 var _ SettingRepository = (*repository.SettingRepository)(nil)
