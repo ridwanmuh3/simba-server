@@ -39,7 +39,7 @@ func (r *NotificationRepository) FindAll(db *gorm.DB, req *model.FindAllNotifica
 
 func (r *NotificationRepository) FilterNotification(req *model.FindAllNotificationsRequest) func(*gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
-		tx = tx.Where("dapur_id = ?", req.DapurID)
+		tx = tx.Scopes(Tenant(req.DapurID))
 
 		if req.UserID > 0 {
 			tx = tx.Where("user_id = ? OR user_id IS NULL", req.UserID)
@@ -60,7 +60,7 @@ func (r *NotificationRepository) FilterNotification(req *model.FindAllNotificati
 func (r *NotificationRepository) CountUnread(db *gorm.DB, dapurID, userID uint) (int64, error) {
 	var count int64
 	query := db.Model(&entity.Notification{}).
-		Where("dapur_id = ? AND is_read = ?", dapurID, false)
+		Scopes(Tenant(dapurID)).Where("is_read = ?", false)
 
 	if userID > 0 {
 		query = query.Where("user_id = ? OR user_id IS NULL", userID)
@@ -72,7 +72,7 @@ func (r *NotificationRepository) CountUnread(db *gorm.DB, dapurID, userID uint) 
 
 func (r *NotificationRepository) MarkRead(db *gorm.DB, dapurID, notificationID uint, userID uint) error {
 	query := db.Model(&entity.Notification{}).
-		Where("id = ? AND dapur_id = ? AND is_read = false", notificationID, dapurID)
+		Scopes(Tenant(dapurID)).Where("id = ? AND is_read = false", notificationID)
 
 	if userID > 0 {
 		query = query.Where("user_id = ? OR user_id IS NULL", userID)
@@ -83,7 +83,7 @@ func (r *NotificationRepository) MarkRead(db *gorm.DB, dapurID, notificationID u
 
 func (r *NotificationRepository) MarkAllRead(db *gorm.DB, dapurID, userID uint) error {
 	query := db.Model(&entity.Notification{}).
-		Where("dapur_id = ? AND is_read = false", dapurID)
+		Scopes(Tenant(dapurID)).Where("is_read = ?", false)
 
 	if userID > 0 {
 		query = query.Where("user_id = ? OR user_id IS NULL", userID)
@@ -93,7 +93,7 @@ func (r *NotificationRepository) MarkAllRead(db *gorm.DB, dapurID, userID uint) 
 }
 
 func (r *NotificationRepository) Delete(db *gorm.DB, dapurID, notificationID uint, userID uint) error {
-	query := db.Where("id = ? AND dapur_id = ?", notificationID, dapurID)
+	query := db.Scopes(Tenant(dapurID)).Where("id = ?", notificationID)
 
 	if userID > 0 {
 		query = query.Where("user_id = ? OR user_id IS NULL", userID)

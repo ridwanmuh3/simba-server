@@ -85,3 +85,22 @@ func (r *UserRepository) FilterUser(query *model.FindAllUserRequest) func(tx *go
 		return tx
 	}
 }
+
+// UpdateLastActive records a heartbeat for a user.
+func (r *UserRepository) UpdateLastActive(db *gorm.DB, userID int, at time.Time) error {
+	return db.Model(&entity.User{}).Where("id = ?", userID).Update("last_active", at).Error
+}
+
+// CountByRole counts users with the given role.
+func (r *UserRepository) CountByRole(db *gorm.DB, role string) (int64, error) {
+	var count int64
+	err := db.Model(new(entity.User)).Where("role = ?", role).Count(&count).Error
+	return count, err
+}
+
+// FindByIdForUpdate locks a user row, scoped to id (users are global, not per-dapur).
+func (r *UserRepository) FindByIdForUpdate(db *gorm.DB, id any) (*entity.User, error) {
+	user := new(entity.User)
+	err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(user).Error
+	return user, err
+}

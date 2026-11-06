@@ -148,5 +148,67 @@ func main() {
 		}
 	}
 
+	// 8. Money/quantity columns: float8 -> NUMERIC. GORM entity tags now
+	//    declare numeric(18,4)/numeric(18,2); AutoMigrate does not alter an
+	//    existing column type, so convert explicitly (idempotent: only
+	//    double-precision columns are touched). Values are exact-decimal
+	//    in the DB from here on; Go still marshals float64 at the API edge
+	//    while all chain math is integer-scaled (util.CalculateMAC).
+	numericCols := []struct{ table, column string }{
+		{"items", "initial_stock"}, {"items", "stock"}, {"items", "unit_price"},
+		{"items", "total_price"}, {"items", "low_stock_threshold"},
+		{"stock_tracks", "amount"}, {"stock_tracks", "previous_stock"},
+		{"stock_tracks", "new_stock"}, {"stock_tracks", "unit_price"},
+		{"stock_tracks", "total_price"},
+		{"invoices", "grand_total"},
+		{"invoice_items", "amount"}, {"invoice_items", "unit_price"},
+		{"invoice_items", "total_price"}, {"invoice_items", "previous_stock"},
+		{"invoice_items", "new_stock"},
+	}
+	for _, nc := range numericCols {
+		var dataType string
+		err := db.Raw(`SELECT data_type FROM information_schema.columns
+			WHERE table_name = ? AND column_name = ?`, nc.table, nc.column).Scan(&dataType).Error
+		if err != nil || dataType != "double precision" {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE " + nc.table + " ALTER COLUMN " + nc.column + " TYPE numeric(18,4) USING " + nc.column + "::numeric(18,4)").Error; err != nil {
+			log.Fatalf("failed to convert %s.%s to numeric: %v", nc.table, nc.column, err)
+		}
+		log.Infof("converted %s.%s to numeric(18,4)", nc.table, nc.column)
+	}
+
+	// 9. Composite FK so a stock_track can never reference an item from a
+	//    different dapur: (item_id, dapur_id) -> items(id, dapur_id).
+	//    Guarded: skipped (with a warning) if orphan rows exist, so a
+	//    dirty database fails soft instead of aborting the migration.
+	var orphans int64
+	if err := db.Raw(`SELECT COUNT(*) FROM stock_tracks st
+		LEFT JOIN items i ON i.id = st.item_id AND i.dapur_id = st.dapur_id
+		WHERE i.id IS NULL`).Scan(&orphans).Error; err != nil {
+		log.Fatalf("failed to check stock_tracks orphans: %v", err)
+	}
+	if orphans > 0 {
+		log.Warnf("skipping composite FK on stock_tracks: %d orphan row(s) with mismatched dapur_id", orphans)
+	} else {
+		var exists int64
+		db.Raw(`SELECT COUNT(*) FROM pg_constraint WHERE conname = 'fk_stock_tracks_item_dapur'`).Scan(&exists)
+		if exists == 0 {
+			if err := db.Exec(`ALTER TABLE stock_tracks
+				ADD CONSTRAINT fk_stock_tracks_item_dapur
+				FOREIGN KEY (item_id, dapur_id) REFERENCES items(id, dapur_id)
+				ON UPDATE CASCADE ON DELETE CASCADE`).Error; err != nil {
+				log.Fatalf("failed to add composite FK on stock_tracks: %v", err)
+			}
+			log.Info("added composite FK stock_tracks(item_id, dapur_id) -> items(id, dapur_id)")
+		}
+	}
+
+	// NOTE (deliberately not automated): Postgres Row-Level Security would
+	// be the defence-in-depth layer on top of the Tenant() scope, but
+	// enabling it requires every transaction to SET LOCAL app.dapur_id
+	// first — rolling that out unguarded would lock the app out of its own
+	// tables. Enable per-table once TenantTx sets the GUC (follow-up).
+
 	log.Info("migration complete")
 }

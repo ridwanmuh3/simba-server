@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/exception"
@@ -33,6 +33,9 @@ type UserRepository interface {
 	FindByToken(db *gorm.DB, user *entity.User, token string) error
 	FindAll(db *gorm.DB, query *model.FindAllUserRequest) ([]entity.User, int64, error)
 	GetUsersStats(db *gorm.DB) (*entity.UserStats, error)
+	UpdateLastActive(db *gorm.DB, userID int, at time.Time) error
+	FindByIdForUpdate(db *gorm.DB, id any) (*entity.User, error)
+	CountByRole(db *gorm.DB, role string) (int64, error)
 }
 
 var _ UserRepository = (*repository.UserRepository)(nil)
@@ -101,9 +104,8 @@ func (s *UserService) Update(ctx context.Context, request *model.UpdateUserReque
 		return nil, err
 	}
 
-	user := new(entity.User)
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		First(user, "id = ?", request.ID).Error; err != nil {
+	user, err := s.userRepository.FindByIdForUpdate(tx, request.ID)
+	if err != nil {
 		s.log.Errorf("failed to find user by id: %v", err)
 		return nil, exception.UserNotFoundError
 	}
@@ -153,8 +155,7 @@ func (s *UserService) Delete(ctx context.Context, request *model.DeleteUserReque
 	}
 
 	if user.Role == "Super Admin" {
-		var count int64
-		tx.Model(user).Where("role = ?", user.Role).Count(&count)
+		count, _ := s.userRepository.CountByRole(tx, user.Role)
 		if count <= 1 {
 			s.log.Errorf("failed to delete last super admin user. system must have one super admin user")
 			return false, exception.UserDeleteSingleSuperAdminError

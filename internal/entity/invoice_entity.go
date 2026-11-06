@@ -20,7 +20,7 @@ type Invoice struct {
 	Penanggungjawab string `gorm:"type:varchar(255)"`
 	Jabatan         string `gorm:"type:varchar(255)"`
 	BankAccount     string `gorm:"type:varchar(100)"`
-	GrandTotal      float64
+	GrandTotal      float64 `gorm:"type:numeric(18,2)"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Items           []InvoiceItem `gorm:"foreignKey:InvoiceID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
@@ -35,11 +35,11 @@ type InvoiceItem struct {
 	ItemName      string `gorm:"type:varchar(255);not null"`
 	Category      string `gorm:"type:varchar(100)"`
 	MeasureUnit   string `gorm:"type:varchar(30)"`
-	Amount        float64
-	UnitPrice     float64
-	TotalPrice    float64
-	PreviousStock float64
-	NewStock      float64
+	Amount        float64 `gorm:"type:numeric(18,4)"`
+	UnitPrice     float64 `gorm:"type:numeric(18,2)"`
+	TotalPrice    float64 `gorm:"type:numeric(18,2)"`
+	PreviousStock float64 `gorm:"type:numeric(18,4)"`
+	NewStock      float64 `gorm:"type:numeric(18,4)"`
 	Supplier      string `gorm:"type:varchar(100)"`
 	StockType     string `gorm:"type:varchar(10)"`
 	CreatedAt     time.Time

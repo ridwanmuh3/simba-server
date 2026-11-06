@@ -24,6 +24,7 @@ type FinanceService struct {
 
 type FinanceRepository interface {
 	Save(db *gorm.DB, entity *entity.Finance) error
+	SaveActivityLog(db *gorm.DB, log *entity.ActivityLog) error
 	Delete(db *gorm.DB, entity *entity.Finance) error
 	FindByIdForUpdate(db *gorm.DB, id any, dapurID uint) (*entity.Finance, error)
 	FindById(db *gorm.DB, id any, dapurID uint) (*entity.Finance, error)
@@ -67,13 +68,13 @@ func (s *FinanceService) Add(ctx context.Context, request *model.AddFinanceReque
 		return nil, exception.InternalServerError
 	}
 
-	if err := tx.Create(&entity.ActivityLog{
+	if err := s.financeRepository.SaveActivityLog(tx, &entity.ActivityLog{
 		Type:        "ADD-FINANCE",
 		Title:       "Data keuangan ditambahkan",
 		Description: fmt.Sprintf("%s - %s", finance.Category, finance.Description),
 		ActionBy:    request.ModifiedBy,
 		DapurID:     request.DapurID,
-	}).Error; err != nil {
+	}); err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return nil, exception.InternalServerError
 	}
@@ -143,13 +144,13 @@ func (s *FinanceService) Delete(ctx context.Context, request *model.DeleteFinanc
 		return false, exception.InternalServerError
 	}
 
-	if err := tx.Create(&entity.ActivityLog{
+	if err := s.financeRepository.SaveActivityLog(tx, &entity.ActivityLog{
 		Type:        "DELETE-FINANCE",
 		Title:       "Data keuangan dihapus",
 		Description: fmt.Sprintf("%s - %s", finance.Category, finance.Description),
 		ActionBy:    finance.ModifiedBy,
 		DapurID:     request.DapurID,
-	}).Error; err != nil {
+	}); err != nil {
 		s.log.Errorf("failed to save activity log to database: %v", err)
 		return false, exception.InternalServerError
 	}

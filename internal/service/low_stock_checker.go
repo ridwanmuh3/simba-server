@@ -17,18 +17,21 @@ type LowStockChecker struct {
 	hub   *websocket.Hub
 	log   *zap.SugaredLogger
 	email *EmailService
+	repo  LowStockCheckerRepository
 }
 
 type LowStockCheckerRepository interface {
-	FindThreshold(db *gorm.DB, dapurID uint) (float64, error)
+	SaveNotification(db *gorm.DB, notif *entity.Notification) error
+	FindSuperAdminUsernames(db *gorm.DB) ([]string, error)
 }
 
-func NewLowStockChecker(db *gorm.DB, hub *websocket.Hub, log *zap.SugaredLogger, email *EmailService) *LowStockChecker {
+func NewLowStockChecker(db *gorm.DB, hub *websocket.Hub, log *zap.SugaredLogger, email *EmailService, repo LowStockCheckerRepository) *LowStockChecker {
 	return &LowStockChecker{
 		db:    db,
 		hub:   hub,
 		log:   log,
 		email: email,
+		repo:  repo,
 	}
 }
 
@@ -47,7 +50,7 @@ func (c *LowStockChecker) Check(item *entity.Item, dapurID uint) {
 			MetaJSON: metaJSON,
 		}
 
-		if err := c.db.Create(notif).Error; err != nil {
+		if err := c.repo.SaveNotification(c.db, notif); err != nil {
 			c.log.Errorw("failed to save low stock notification", "error", err, "item_id", item.ID)
 			return
 		}
@@ -77,10 +80,7 @@ func (c *LowStockChecker) sendEmailAlert(item *entity.Item, dapurID uint, thresh
 		return
 		}
 
-	var adminEmails []string
-	err := c.db.Model(&entity.User{}).
-		Where("role = ? AND deleted_at IS NULL", "Super Admin").
-		Pluck("username", &adminEmails).Error
+	adminEmails, err := c.repo.FindSuperAdminUsernames(c.db)
 	if err != nil {
 		c.log.Errorw("failed to fetch admin emails for low stock alert", "error", err)
 		return

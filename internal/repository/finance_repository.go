@@ -19,13 +19,13 @@ func NewFinanceRepository() *FinanceRepository {
 func (r *FinanceRepository) FindByIdForUpdate(db *gorm.DB, id any, dapurID uint) (*entity.Finance, error) {
 	finance := new(entity.Finance)
 	err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND dapur_id = ?", id, dapurID).First(finance).Error
+		Scopes(Tenant(dapurID)).Where("id = ?", id).First(finance).Error
 	return finance, err
 }
 
 func (r *FinanceRepository) FindById(db *gorm.DB, id any, dapurID uint) (*entity.Finance, error) {
 	finance := new(entity.Finance)
-	err := db.Where("id = ? AND dapur_id = ?", id, dapurID).First(finance).Error
+	err := db.Scopes(Tenant(dapurID)).Where("id = ?", id).First(finance).Error
 	return finance, err
 }
 
@@ -63,12 +63,12 @@ func (r *FinanceRepository) FindAllUnpaginated(db *gorm.DB, dapurID uint) ([]ent
 	var finances []entity.Finance
 	var total int64
 
-	q := db.Model(new(entity.Finance)).Where("dapur_id = ?", dapurID)
+	q := db.Model(new(entity.Finance)).Scopes(Tenant(dapurID))
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := db.Where("dapur_id = ?", dapurID).
+	if err := db.Scopes(Tenant(dapurID)).
 		Order("created_at DESC, id DESC").
 		Find(&finances).Error; err != nil {
 		return nil, 0, err
@@ -79,9 +79,7 @@ func (r *FinanceRepository) FindAllUnpaginated(db *gorm.DB, dapurID uint) ([]ent
 
 func (r *FinanceRepository) FilterFinance(query *model.FindAllFinanceRequest) func(*gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
-		if query.DapurID > 0 {
-			tx = tx.Where("dapur_id = ?", query.DapurID)
-		}
+		tx = tx.Scopes(Tenant(query.DapurID))
 		tx = tx.Scopes(
 			SearchScope(
 				[]string{"category", "description", "extra_note", "type"},
@@ -91,4 +89,9 @@ func (r *FinanceRepository) FilterFinance(query *model.FindAllFinanceRequest) fu
 		)
 		return tx
 	}
+}
+
+// SaveActivityLog persists an activity log inside the caller's transaction.
+func (r *FinanceRepository) SaveActivityLog(db *gorm.DB, log *entity.ActivityLog) error {
+	return db.Create(log).Error
 }

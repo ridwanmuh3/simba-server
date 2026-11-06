@@ -5,13 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/ridwanmuh3/simba-server/internal/entity"
 	"github.com/ridwanmuh3/simba-server/internal/exception"
@@ -51,66 +48,36 @@ type InvoiceRepository interface {
 	Delete(db *gorm.DB, id uint, dapurID uint) error
 	SaveItems(db *gorm.DB, items []entity.InvoiceItem) error
 	DeleteItemsByInvoiceID(db *gorm.DB, invoiceID uint) error
+	FindByIdForUpdate(db *gorm.DB, id uint, dapurID uint) (*entity.Invoice, error)
+	Update(db *gorm.DB, invoice *entity.Invoice) error
+	FindStocksForInvoice(db *gorm.DB, stockType string, stockIDs []uint, dateFrom, dateTo string, dapurID uint) ([]entity.StockTracking, error)
+	FindStocksByIDs(db *gorm.DB, stockIDs []int, dapurID uint) ([]entity.StockTracking, error)
+	FindItemsFlat(db *gorm.DB, dapurID uint, stockType, searchQuery, startDate, endDate string, page, size int) ([]repository.InvoiceItemFlatRow, int64, error)
 }
 
 var _ InvoiceRepository = (*repository.InvoiceRepository)(nil)
 
 func NewInvoiceService(db *gorm.DB, logger *zap.SugaredLogger, validate *validator.Validate, invoiceRepo InvoiceRepository) *InvoiceService {
-	return &InvoiceService{
-		db:          db,
-		log:         logger,
-		validate:    validate,
-		invoiceRepo: invoiceRepo,
-	}
+	return &InvoiceService{db: db, log: logger, validate: validate, invoiceRepo: invoiceRepo}
 }
 
 func (s *InvoiceService) GetInvoiceItems(ctx context.Context, request *model.GetInvoiceItemsRequest) (*model.InvoiceSummary, error) {
 	db := s.db.WithContext(ctx)
-
 	if err := s.validate.Struct(request); err != nil {
 		s.log.Errorf("failed to validate request body: %v", err)
 		return nil, err
 	}
-
-	var stocks []entity.StockTracking
 	stockType := request.StockType
 	if stockType == "" {
 		stockType = "OUT"
 	}
-
-	query := db.Model(new(entity.StockTracking)).Preload("Item").
-		Where("type = ? AND dapur_id = ?", stockType, request.DapurID)
-
-	if len(request.StockIDs) > 0 {
-		query = query.Where("id IN ?", request.StockIDs)
-	} else {
-		if request.DateFrom != "" {
-			parsedFrom, err := time.Parse(time.RFC3339Nano, request.DateFrom)
-			if err != nil {
-				s.log.Errorf("failed to parse date from: %v", err)
-				return nil, exception.InternalServerError
-			}
-			query = query.Where("created_at >= ?", parsedFrom.UTC())
-		}
-
-		if request.DateTo != "" {
-			parsedTo, err := time.Parse(time.RFC3339Nano, request.DateTo)
-			if err != nil {
-				s.log.Errorf("failed to parse date to: %v", err)
-				return nil, exception.InternalServerError
-			}
-			query = query.Where("created_at <= ?", parsedTo.UTC())
-		}
-	}
-
-	if err := query.Order("item_id ASC").Limit(500).Find(&stocks).Error; err != nil {
+	stocks, err := s.invoiceRepo.FindStocksForInvoice(db, stockType, request.StockIDs, request.DateFrom, request.DateTo, request.DapurID)
+	if err != nil {
 		s.log.Errorf("failed to get invoice items: %v", err)
 		return nil, exception.InternalServerError
 	}
-
 	var grandTotal float64
 	responses := make([]model.StockResponse, len(stocks))
-
 	for i, stock := range stocks {
 		mappedResponse := converter.StockToResponse(&stock)
 		lineTotal := util.Round2(stock.Amount * stock.UnitPrice)
@@ -118,26 +85,20 @@ func (s *InvoiceService) GetInvoiceItems(ctx context.Context, request *model.Get
 		grandTotal = util.Round2(grandTotal + lineTotal)
 		responses[i] = *mappedResponse
 	}
-
-	return &model.InvoiceSummary{
-		Items:      responses,
-		GrandTotal: grandTotal,
-	}, nil
+	return &model.InvoiceSummary{Items: responses, GrandTotal: grandTotal}, nil
 }
-
-const docSeqLockKeyBase = int64(7291000)
 
 func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.GenerateInvoiceRequest, summary *model.InvoiceSummary) error {
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
 
-	if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", docSeqLockKeyBase+int64(request.DapurID)).Error; err != nil {
+	if err := repository.LockDocumentSequence(tx, request.DapurID); err != nil {
 		s.log.Errorf("failed to acquire document sequence lock: %v", err)
 		return exception.InternalServerError
 	}
 
-	invCur, hasInv := readSeqFrom(tx, KeySeqInvoice, request.DapurID)
-	poCur, hasPo := readSeqFrom(tx, KeySeqPO, request.DapurID)
+	invCur, hasInv := repository.ReadSeq(tx, KeySeqInvoice, request.DapurID)
+	poCur, hasPo := repository.ReadSeq(tx, KeySeqPO, request.DapurID)
 
 	var invBase, poBase int
 	if hasInv {
@@ -147,7 +108,7 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 		poBase = poCur
 	}
 	if !hasInv || !hasPo {
-		maxInv, maxPo, err := getDocumentSequenceMaxFrom(tx, request.DapurID)
+		maxInv, maxPo, err := repository.MaxDocumentSequence(tx, request.DapurID)
 		if err != nil {
 			return err
 		}
@@ -163,20 +124,17 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 	poNo := strings.TrimSpace(request.PONo)
 	invGenerated := false
 	poGenerated := false
-
 	if invNo == "" {
-		invSeq := invBase + 1
-		invNo = fmt.Sprintf("INV-%03d", invSeq)
+		invNo = fmt.Sprintf("INV-%03d", invBase+1)
 		invGenerated = true
 	}
 	if poNo == "" {
-		poSeq := poBase + 1
-		poNo = fmt.Sprintf("PO-%03d", poSeq)
+		poNo = fmt.Sprintf("PO-%03d", poBase+1)
 		poGenerated = true
 	}
 
-	invSeq, invOK := parseDocumentSequence(invNo, "INV")
-	poSeq, poOK := parseDocumentSequence(poNo, "PO")
+	invSeq, invOK := repository.ParseDocumentSequence(invNo, "INV")
+	poSeq, poOK := repository.ParseDocumentSequence(poNo, "PO")
 	invBump := invGenerated || (invOK && invSeq == invBase+1)
 	poBump := poGenerated || (poOK && poSeq == poBase+1)
 
@@ -197,7 +155,6 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 		Jabatan:         request.Jabatan,
 		BankAccount:     request.BankAccount,
 	}
-
 	if summary != nil {
 		invoice.GrandTotal = summary.GrandTotal
 		invoice.Items = make([]entity.InvoiceItem, len(summary.Items))
@@ -221,186 +178,129 @@ func (s *InvoiceService) SaveInvoice(ctx context.Context, request *model.Generat
 
 	if err := s.invoiceRepo.Save(tx, &invoice); err != nil {
 		if ok, msg := isDuplicateKeyError(err); ok {
-			return fiber.NewError(fiber.StatusConflict, msg)
+			return exception.DuplicateDocumentError(msg)
 		}
 		s.log.Errorf("failed to save invoice record: %v", err)
 		return exception.InternalServerError
 	}
-
 	if invBump {
-		if err := upsertSeqTo(tx, KeySeqInvoice, request.DapurID, invSeq); err != nil {
+		if err := repository.UpsertSeq(tx, KeySeqInvoice, request.DapurID, invSeq); err != nil {
 			s.log.Errorf("failed to bump invoice seq: %v", err)
 			return exception.InternalServerError
 		}
 	}
 	if poBump {
-		if err := upsertSeqTo(tx, KeySeqPO, request.DapurID, poSeq); err != nil {
+		if err := repository.UpsertSeq(tx, KeySeqPO, request.DapurID, poSeq); err != nil {
 			s.log.Errorf("failed to bump po seq: %v", err)
 			return exception.InternalServerError
 		}
 	}
-
 	if err := tx.Commit().Error; err != nil {
 		if ok, msg := isDuplicateKeyError(err); ok {
-			return fiber.NewError(fiber.StatusConflict, msg)
+			return exception.DuplicateDocumentError(msg)
 		}
 		s.log.Errorf("failed to commit invoice save: %v", err)
 		return exception.InternalServerError
 	}
-
 	return nil
 }
 
 func (s *InvoiceService) FindInvoiceByID(ctx context.Context, id uint, dapurID uint) (*model.InvoiceData, error) {
 	db := s.db.WithContext(ctx)
-
 	invoice, err := s.invoiceRepo.FindByIdWithItems(db, id, dapurID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
+			return nil, exception.InvoiceNotFoundError
 		}
 		s.log.Errorf("failed to find invoice by id: %v", err)
 		return nil, exception.InternalServerError
 	}
-
 	items := make([]model.StockResponse, len(invoice.Items))
 	for i, it := range invoice.Items {
 		items[i] = model.StockResponse{
-			ID:            int(it.ID),
-			Type:          it.StockType,
-			Amount:        it.Amount,
-			PreviousStock: it.PreviousStock,
-			NewStock:      it.NewStock,
-			UnitPrice:     it.UnitPrice,
-			TotalPrice:    it.TotalPrice,
-			Supplier:      it.Supplier,
-			CreatedAt:     it.CreatedAt,
+			ID: int(it.ID), Type: it.StockType, Amount: it.Amount,
+			PreviousStock: it.PreviousStock, NewStock: it.NewStock,
+			UnitPrice: it.UnitPrice, TotalPrice: it.TotalPrice,
+			Supplier: it.Supplier, CreatedAt: it.CreatedAt,
 			Item: model.ItemResponse{
-				ID:          it.ItemID,
-				Name:        it.ItemName,
-				Category:    it.Category,
-				MeasureUnit: it.MeasureUnit,
-				UnitPrice:   it.UnitPrice,
+				ID: it.ItemID, Name: it.ItemName, Category: it.Category,
+				MeasureUnit: it.MeasureUnit, UnitPrice: it.UnitPrice,
 			},
 		}
 	}
-
 	return &model.InvoiceData{
-		StockType:       invoice.StockType,
-		CompanyName:     invoice.CompanyName,
-		CompanyAddress:  invoice.CompanyAddress,
-		CompanyContact:  invoice.CompanyContact,
-		InvoiceNo:       invoice.InvoiceNumber,
-		Date:            invoice.InvoiceDate,
-		PONo:            invoice.PONumber,
-		Kebutuhan:       invoice.Kebutuhan,
-		ReceiverName:    invoice.ReceiverName,
-		ReceiverAddress: invoice.ReceiverAddress,
-		Items:           items,
-		GrandTotal:      invoice.GrandTotal,
-		Keterangan:      invoice.Keterangan,
-		Penanggungjawab: invoice.Penanggungjawab,
-		Jabatan:         invoice.Jabatan,
-		BankAccount:     invoice.BankAccount,
+		StockType: invoice.StockType, CompanyName: invoice.CompanyName,
+		CompanyAddress: invoice.CompanyAddress, CompanyContact: invoice.CompanyContact,
+		InvoiceNo: invoice.InvoiceNumber, Date: invoice.InvoiceDate,
+		PONo: invoice.PONumber, Kebutuhan: invoice.Kebutuhan,
+		ReceiverName: invoice.ReceiverName, ReceiverAddress: invoice.ReceiverAddress,
+		Items: items, GrandTotal: invoice.GrandTotal, Keterangan: invoice.Keterangan,
+		Penanggungjawab: invoice.Penanggungjawab, Jabatan: invoice.Jabatan,
+		BankAccount: invoice.BankAccount,
 	}, nil
 }
 
 func (s *InvoiceService) FindInvoiceDetail(ctx context.Context, id uint, dapurID uint) (*model.InvoiceDetailResponse, error) {
 	db := s.db.WithContext(ctx)
-
 	invoice, err := s.invoiceRepo.FindByIdWithItems(db, id, dapurID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
+			return nil, exception.InvoiceNotFoundError
 		}
 		s.log.Errorf("failed to find invoice detail %d: %v", id, err)
 		return nil, exception.InternalServerError
 	}
-
 	items := make([]model.InvoiceItemResponse, len(invoice.Items))
 	for i, it := range invoice.Items {
 		items[i] = model.InvoiceItemResponse{
-			ID:          it.ID,
-			ItemName:    it.ItemName,
-			Category:    it.Category,
-			MeasureUnit: it.MeasureUnit,
-			Amount:      it.Amount,
-			UnitPrice:   it.UnitPrice,
-			TotalPrice:  it.TotalPrice,
-			Supplier:    it.Supplier,
-			StockType:   it.StockType,
+			ID: it.ID, ItemName: it.ItemName, Category: it.Category,
+			MeasureUnit: it.MeasureUnit, Amount: it.Amount, UnitPrice: it.UnitPrice,
+			TotalPrice: it.TotalPrice, Supplier: it.Supplier, StockType: it.StockType,
 		}
 	}
-
 	return &model.InvoiceDetailResponse{
 		InvoiceResponse: model.InvoiceResponse{
-			ID:              invoice.ID,
-			StockType:       invoice.StockType,
-			CompanyName:     invoice.CompanyName,
-			CompanyContact:  invoice.CompanyContact,
-			CompanyAddress:  invoice.CompanyAddress,
-			InvoiceNumber:   invoice.InvoiceNumber,
-			PONumber:        invoice.PONumber,
-			Kebutuhan:       invoice.Kebutuhan,
-			ReceiverName:    invoice.ReceiverName,
-			ReceiverAddress: invoice.ReceiverAddress,
-			InvoiceDate:     invoice.InvoiceDate,
-			Keterangan:      invoice.Keterangan,
-			Penanggungjawab: invoice.Penanggungjawab,
-			Jabatan:         invoice.Jabatan,
-			BankAccount:     invoice.BankAccount,
-			HasItems:        len(invoice.Items) > 0,
-			CreatedAt:       invoice.CreatedAt,
-			UpdatedAt:       invoice.UpdatedAt,
+			ID: invoice.ID, StockType: invoice.StockType, CompanyName: invoice.CompanyName,
+			CompanyContact: invoice.CompanyContact, CompanyAddress: invoice.CompanyAddress,
+			InvoiceNumber: invoice.InvoiceNumber, PONumber: invoice.PONumber,
+			Kebutuhan: invoice.Kebutuhan, ReceiverName: invoice.ReceiverName,
+			ReceiverAddress: invoice.ReceiverAddress, InvoiceDate: invoice.InvoiceDate,
+			Keterangan: invoice.Keterangan, Penanggungjawab: invoice.Penanggungjawab,
+			Jabatan: invoice.Jabatan, BankAccount: invoice.BankAccount,
+			HasItems: len(invoice.Items) > 0, CreatedAt: invoice.CreatedAt, UpdatedAt: invoice.UpdatedAt,
 		},
-		Items:      items,
-		GrandTotal: invoice.GrandTotal,
+		Items: items, GrandTotal: invoice.GrandTotal,
 	}, nil
 }
 
 func (s *InvoiceService) FindAllInvoices(ctx context.Context, request *model.FindAllInvoicesRequest) ([]model.InvoiceResponse, int64, error) {
 	db := s.db.WithContext(ctx)
-
 	page := request.Page
 	if page < 1 {
 		page = 1
 	}
-
 	size := request.Size
 	if size < 1 {
 		size = 10
 	}
-
 	rows, total, err := s.invoiceRepo.FindAll(db, request.DapurID, request.SearchQuery, request.StartDate, request.EndDate, page, size)
 	if err != nil {
 		s.log.Errorf("failed to get invoice records: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
-
 	responses := make([]model.InvoiceResponse, len(rows))
 	for i, invoice := range rows {
 		responses[i] = model.InvoiceResponse{
-			ID:              invoice.ID,
-			StockType:       invoice.StockType,
-			CompanyName:     invoice.CompanyName,
-			CompanyContact:  invoice.CompanyContact,
-			CompanyAddress:  invoice.CompanyAddress,
-			InvoiceNumber:   invoice.InvoiceNumber,
-			PONumber:        invoice.PONumber,
-			Kebutuhan:       invoice.Kebutuhan,
-			ReceiverName:    invoice.ReceiverName,
-			ReceiverAddress: invoice.ReceiverAddress,
-			InvoiceDate:     invoice.InvoiceDate,
-			Keterangan:      invoice.Keterangan,
-			Penanggungjawab: invoice.Penanggungjawab,
-			Jabatan:         invoice.Jabatan,
-			BankAccount:     invoice.BankAccount,
-			HasItems:        invoice.HasItems,
-			CreatedAt:       invoice.CreatedAt,
-			UpdatedAt:       invoice.UpdatedAt,
+			ID: invoice.ID, StockType: invoice.StockType, CompanyName: invoice.CompanyName,
+			CompanyContact: invoice.CompanyContact, CompanyAddress: invoice.CompanyAddress,
+			InvoiceNumber: invoice.InvoiceNumber, PONumber: invoice.PONumber,
+			Kebutuhan: invoice.Kebutuhan, ReceiverName: invoice.ReceiverName,
+			ReceiverAddress: invoice.ReceiverAddress, InvoiceDate: invoice.InvoiceDate,
+			Keterangan: invoice.Keterangan, Penanggungjawab: invoice.Penanggungjawab,
+			Jabatan: invoice.Jabatan, BankAccount: invoice.BankAccount,
+			HasItems: invoice.HasItems, CreatedAt: invoice.CreatedAt, UpdatedAt: invoice.UpdatedAt,
 		}
 	}
-
 	return responses, total, nil
 }
 
@@ -408,12 +308,10 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
 
-	var invoice entity.Invoice
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND dapur_id = ?", request.ID, request.DapurID).
-		First(&invoice).Error; err != nil {
+	invoice, err := s.invoiceRepo.FindByIdForUpdate(tx, request.ID, request.DapurID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
+			return exception.InvoiceNotFoundError
 		}
 		s.log.Errorf("failed to find invoice %d: %v", request.ID, err)
 		return exception.InternalServerError
@@ -431,42 +329,30 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 	invoice.BankAccount = request.BankAccount
 
 	if len(request.StockIDs) > 0 {
-		var stocks []entity.StockTracking
-		if err := tx.Preload("Item").
-			Where("id IN ? AND dapur_id = ?", request.StockIDs, request.DapurID).
-			Find(&stocks).Error; err != nil {
+		stocks, err := s.invoiceRepo.FindStocksByIDs(tx, request.StockIDs, request.DapurID)
+		if err != nil {
 			s.log.Errorf("failed to fetch stocks for invoice update %d: %v", request.ID, err)
 			return exception.InternalServerError
 		}
-
 		var grandTotal float64
 		newItems := make([]entity.InvoiceItem, len(stocks))
 		for i, stock := range stocks {
 			lineTotal := util.Round2(stock.Amount * stock.UnitPrice)
 			grandTotal = util.Round2(grandTotal + lineTotal)
 			newItems[i] = entity.InvoiceItem{
-				InvoiceID:     invoice.ID,
-				ItemID:        stock.Item.ID,
-				ItemName:      stock.Item.Name,
-				Category:      stock.Item.Category,
-				MeasureUnit:   stock.Item.MeasureUnit,
-				Amount:        stock.Amount,
-				UnitPrice:     stock.UnitPrice,
-				TotalPrice:    lineTotal,
-				PreviousStock: stock.PreviousStock,
-				NewStock:      stock.NewStock,
-				Supplier:      stock.Supplier,
-				StockType:     stock.Type,
-				CreatedAt:     stock.CreatedAt,
+				InvoiceID: invoice.ID, ItemID: stock.Item.ID, ItemName: stock.Item.Name,
+				Category: stock.Item.Category, MeasureUnit: stock.Item.MeasureUnit,
+				Amount: stock.Amount, UnitPrice: stock.UnitPrice, TotalPrice: lineTotal,
+				PreviousStock: stock.PreviousStock, NewStock: stock.NewStock,
+				Supplier: stock.Supplier, StockType: stock.Type, CreatedAt: stock.CreatedAt,
 			}
 		}
 		invoice.GrandTotal = grandTotal
-
 		if err := s.invoiceRepo.DeleteItemsByInvoiceID(tx, invoice.ID); err != nil {
 			s.log.Errorf("failed to delete old invoice items %d: %v", invoice.ID, err)
 			return exception.InternalServerError
 		}
-		if err := tx.Save(&invoice).Error; err != nil {
+		if err := s.invoiceRepo.Update(tx, invoice); err != nil {
 			s.log.Errorf("failed to update invoice %d: %v", invoice.ID, err)
 			return exception.InternalServerError
 		}
@@ -481,22 +367,19 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, request *model.Updat
 		return nil
 	}
 
-	if err := tx.Save(&invoice).Error; err != nil {
+	if err := s.invoiceRepo.Update(tx, invoice); err != nil {
 		s.log.Errorf("failed to update invoice %d: %v", request.ID, err)
 		return exception.InternalServerError
 	}
-
 	if err := tx.Commit().Error; err != nil {
 		s.log.Errorf("failed to commit invoice update %d: %v", request.ID, err)
 		return exception.InternalServerError
 	}
-
 	return nil
 }
 
 func (s *InvoiceService) GetInvoiceItemsFlat(ctx context.Context, req *model.GetInvoiceItemsFlatRequest) ([]model.InvoiceItemFlatResponse, int64, error) {
 	db := s.db.WithContext(ctx)
-
 	page := req.Page
 	if page < 1 {
 		page = 1
@@ -505,92 +388,11 @@ func (s *InvoiceService) GetInvoiceItemsFlat(ctx context.Context, req *model.Get
 	if size < 1 {
 		size = 10
 	}
-
-	base := db.Table("invoice_items").
-		Joins("JOIN invoices ON invoice_items.invoice_id = invoices.id").
-		Where("invoices.dapur_id = ?", req.DapurID)
-
-	if req.StockType != "" {
-		base = base.Where("invoice_items.stock_type = ?", req.StockType)
-	}
-
-	if req.SearchQuery != "" {
-		base = base.Where("invoice_items.item_name LIKE ?", "%"+req.SearchQuery+"%")
-	}
-	if req.StartDate != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, req.StartDate); err == nil {
-			base = base.Where("invoice_items.created_at >= ?", parsed.UTC())
-		}
-	}
-	if req.EndDate != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, req.EndDate); err == nil {
-			base = base.Where("invoice_items.created_at <= ?", parsed.UTC())
-		}
-	}
-
-	var total int64
-	if err := base.Count(&total).Error; err != nil {
-		s.log.Errorf("failed to count invoice items flat: %v", err)
-		return nil, 0, exception.InternalServerError
-	}
-
-	type flatRow struct {
-		Date           time.Time `gorm:"column:date"`
-		InvoiceNumber  string    `gorm:"column:invoice_number"`
-		ItemName       string    `gorm:"column:item_name"`
-		MeasureUnit    string    `gorm:"column:measure_unit"`
-		Amount         float64   `gorm:"column:amount"`
-		StockType      string    `gorm:"column:stock_type"`
-		BuyPrice       float64   `gorm:"column:buy_price"`
-		SellPrice      float64   `gorm:"column:sell_price"`
-		TotalBuyPrice  float64   `gorm:"column:total_buy_price"`
-		TotalSellPrice float64   `gorm:"column:total_sell_price"`
-	}
-
-	var rows []flatRow
-	err := base.
-		Select(`
-			invoice_items.created_at AS date,
-			invoices.invoice_number,
-			invoice_items.item_name,
-			invoice_items.measure_unit,
-			invoice_items.amount,
-			invoice_items.stock_type,
-			CASE WHEN invoice_items.stock_type = 'IN'
-				THEN invoice_items.unit_price
-				ELSE COALESCE((
-					SELECT AVG(st.unit_price) FROM stock_tracks st
-					WHERE st.item_id = invoice_items.item_id AND st.type = 'IN'
-					AND st.deleted_at IS NULL AND st.dapur_id = invoices.dapur_id
-				), COALESCE(items.unit_price, 0))
-			END AS buy_price,
-			CASE WHEN invoice_items.stock_type = 'OUT'
-				THEN invoice_items.unit_price
-				ELSE COALESCE(items.unit_price, 0)
-			END AS sell_price,
-			CASE WHEN invoice_items.stock_type = 'IN'
-				THEN invoice_items.total_price
-				ELSE invoice_items.amount * COALESCE((
-					SELECT AVG(st.unit_price) FROM stock_tracks st
-					WHERE st.item_id = invoice_items.item_id AND st.type = 'IN'
-					AND st.deleted_at IS NULL AND st.dapur_id = invoices.dapur_id
-				), COALESCE(items.unit_price, 0))
-			END AS total_buy_price,
-			CASE WHEN invoice_items.stock_type = 'OUT'
-				THEN invoice_items.total_price
-				ELSE invoice_items.amount * COALESCE(items.unit_price, 0)
-			END AS total_sell_price
-		`).
-		Joins("LEFT JOIN items ON invoice_items.item_id = items.id AND items.deleted_at IS NULL").
-		Order("invoices.created_at DESC, invoice_items.id DESC").
-		Offset((page - 1) * size).
-		Limit(size).
-		Scan(&rows).Error
+	rows, total, err := s.invoiceRepo.FindItemsFlat(db, req.DapurID, req.StockType, req.SearchQuery, req.StartDate, req.EndDate, page, size)
 	if err != nil {
 		s.log.Errorf("failed to fetch invoice items flat: %v", err)
 		return nil, 0, exception.InternalServerError
 	}
-
 	responses := make([]model.InvoiceItemFlatResponse, len(rows))
 	for i, r := range rows {
 		date := ""
@@ -598,16 +400,10 @@ func (s *InvoiceService) GetInvoiceItemsFlat(ctx context.Context, req *model.Get
 			date = r.Date.Format("2006-01-02")
 		}
 		responses[i] = model.InvoiceItemFlatResponse{
-			Date:           date,
-			InvoiceNumber:  r.InvoiceNumber,
-			ItemName:       r.ItemName,
-			MeasureUnit:    r.MeasureUnit,
-			Amount:         r.Amount,
-			StockType:      r.StockType,
-			BuyPrice:       r.BuyPrice,
-			SellPrice:      r.SellPrice,
-			TotalBuyPrice:  r.TotalBuyPrice,
-			TotalSellPrice: r.TotalSellPrice,
+			Date: date, InvoiceNumber: r.InvoiceNumber, ItemName: r.ItemName,
+			MeasureUnit: r.MeasureUnit, Amount: r.Amount, StockType: r.StockType,
+			BuyPrice: r.BuyPrice, SellPrice: r.SellPrice,
+			TotalBuyPrice: r.TotalBuyPrice, TotalSellPrice: r.TotalSellPrice,
 		}
 	}
 	return responses, total, nil
@@ -617,17 +413,13 @@ func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint, dapurID uin
 	tx := s.db.WithContext(ctx).Begin()
 	defer tx.Rollback()
 
-	var invoice entity.Invoice
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND dapur_id = ?", id, dapurID).
-		First(&invoice).Error; err != nil {
+	if _, err := s.invoiceRepo.FindByIdForUpdate(tx, id, dapurID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "invoice tidak ditemukan")
+			return exception.InvoiceNotFoundError
 		}
 		s.log.Errorf("failed to find invoice %d: %v", id, err)
 		return exception.InternalServerError
 	}
-
 	if err := s.invoiceRepo.DeleteItemsByInvoiceID(tx, id); err != nil {
 		s.log.Errorf("failed to delete invoice items for invoice %d: %v", id, err)
 		return exception.InternalServerError
@@ -636,11 +428,9 @@ func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uint, dapurID uin
 		s.log.Errorf("failed to delete invoice %d: %v", id, err)
 		return exception.InternalServerError
 	}
-
 	if err := tx.Commit().Error; err != nil {
 		s.log.Errorf("failed to commit invoice delete %d: %v", id, err)
 		return exception.InternalServerError
 	}
-
 	return nil
 }

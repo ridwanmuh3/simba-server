@@ -77,7 +77,8 @@ func (r *ItemRepository) FindAllStocks(db *gorm.DB, query *model.FindAllStocksRe
 func (r *ItemRepository) FindLastStockPrice(db *gorm.DB, itemID string, stockType string, dapurID uint) (float64, error) {
 	var stock entity.StockTracking
 	err := db.Select("unit_price").
-		Where("item_id = ? AND type = ? AND dapur_id = ?", itemID, stockType, dapurID).
+		Scopes(Tenant(dapurID)).
+		Where("item_id = ? AND type = ?", itemID, stockType).
 		Order("created_at DESC, id DESC").
 		Take(&stock).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -88,10 +89,8 @@ func (r *ItemRepository) FindLastStockPrice(db *gorm.DB, itemID string, stockTyp
 
 func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
-		if query.DapurID > 0 {
-			tx = tx.Where("dapur_id = ?", query.DapurID)
-		}
 		return tx.Scopes(
+			Tenant(query.DapurID),
 			SearchScope([]string{"id", "name", "category"}, query.SearchQuery),
 			DateRangeScope("created_at", query.StartDate, query.EndDate),
 		)
@@ -101,9 +100,7 @@ func (r *ItemRepository) FilterItem(query *model.FindAllItemsRequest) func(tx *g
 func (r *ItemRepository) FilterStock(query *model.FindAllStocksRequest) func(tx *gorm.DB) *gorm.DB {
 	return func(tx *gorm.DB) *gorm.DB {
 		tx = tx.Joins("LEFT JOIN items AS item ON item.id = stock_tracks.item_id")
-		if query.DapurID > 0 {
-			tx = tx.Where("stock_tracks.dapur_id = ?", query.DapurID)
-		}
+		tx = tx.Scopes(TenantColumn("stock_tracks", query.DapurID))
 		tx = tx.Scopes(
 			SearchScope(
 				[]string{"stock_tracks.item_id", "item.name", "item.category", "stock_tracks.supplier"},

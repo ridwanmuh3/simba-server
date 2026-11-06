@@ -57,7 +57,7 @@ func Bootstrap(config *BootstrapConfig) {
 	}, config.Log)
 
 	notificationService := service.NewNotificationService(config.DB, config.Log, config.Validate, notificationRepository)
-	lowStockChecker := service.NewLowStockChecker(config.DB, wsHub, config.Log, emailService)
+	lowStockChecker := service.NewLowStockChecker(config.DB, wsHub, config.Log, emailService, repository.NewLowStockRepository())
 	activityEmitter := service.NewActivityEmitter(config.DB, wsHub, config.Log, 256)
 	activityEmitter.StartWorkers(2)
 

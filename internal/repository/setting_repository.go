@@ -16,7 +16,7 @@ func NewSettingRepository() *SettingRepository {
 
 func (r *SettingRepository) GetByKey(db *gorm.DB, key string, dapurID uint) (*entity.AppSetting, error) {
 	var setting entity.AppSetting
-	err := db.Where("key = ? AND dapur_id = ?", key, dapurID).First(&setting).Error
+	err := db.Scopes(Tenant(dapurID)).Where("key = ?", key).First(&setting).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil

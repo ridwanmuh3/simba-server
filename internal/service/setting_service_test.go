@@ -1,6 +1,10 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ridwanmuh3/simba-server/internal/repository"
+)
 
 func TestParseDocumentSequence(t *testing.T) {
 	tests := []struct {
@@ -21,7 +25,7 @@ func TestParseDocumentSequence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotSeq, gotParsed := parseDocumentSequence(tt.value, tt.prefix)
+			gotSeq, gotParsed := repository.ParseDocumentSequence(tt.value, tt.prefix)
 			if gotSeq != tt.wantSeq || gotParsed != tt.wantParsed {
 				t.Fatalf("parseDocumentSequence(%q, %q) = (%d, %v), want (%d, %v)",
 					tt.value, tt.prefix, gotSeq, gotParsed, tt.wantSeq, tt.wantParsed)

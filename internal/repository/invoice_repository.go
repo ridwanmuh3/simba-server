@@ -39,18 +39,18 @@ type InvoiceHistoryRow struct {
 
 func (r *InvoiceRepository) FindById(db *gorm.DB, id uint, dapurID uint) (*entity.Invoice, error) {
 	var invoice entity.Invoice
-	err := db.Where("id = ? AND dapur_id = ?", id, dapurID).First(&invoice).Error
+	err := db.Scopes(Tenant(dapurID)).Where("id = ?", id).First(&invoice).Error
 	return &invoice, err
 }
 
 func (r *InvoiceRepository) FindByIdWithItems(db *gorm.DB, id uint, dapurID uint) (*entity.Invoice, error) {
 	var invoice entity.Invoice
-	err := db.Preload("Items").Where("id = ? AND dapur_id = ?", id, dapurID).First(&invoice).Error
+	err := db.Preload("Items").Scopes(Tenant(dapurID)).Where("id = ?", id).First(&invoice).Error
 	return &invoice, err
 }
 
 func (r *InvoiceRepository) FindAll(db *gorm.DB, dapurID uint, searchQuery, startDate, endDate string, page, size int) ([]InvoiceHistoryRow, int64, error) {
-	query := db.Table("invoices").Where("dapur_id = ?", dapurID)
+	query := db.Table("invoices").Scopes(Tenant(dapurID))
 
 	if searchQuery != "" {
 		search := "%" + searchQuery + "%"
@@ -123,5 +123,5 @@ func (r *InvoiceRepository) DeleteItemsByInvoiceID(db *gorm.DB, invoiceID uint) 
 }
 
 func (r *InvoiceRepository) Delete(db *gorm.DB, id uint, dapurID uint) error {
-	return db.Where("id = ? AND dapur_id = ?", id, dapurID).Delete(&entity.Invoice{}).Error
+	return db.Scopes(Tenant(dapurID)).Where("id = ?", id).Delete(&entity.Invoice{}).Error
 }
