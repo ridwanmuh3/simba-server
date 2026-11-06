@@ -317,7 +317,3 @@ atlas migrate apply --env local
 Schema versioning tracked in `atlas.sum`.
 
 ---
-
-## 📝 License
-
-Internal project — SATU TEKNOLOGI INDONESIA
